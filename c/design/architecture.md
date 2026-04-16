@@ -16,20 +16,20 @@ The refactoring goal is **separation of concerns**: each module owns one thing, 
 ## 2. Target File Structure
 
 ```
-withC/
+c/
 ├── terminal/
 │   └── calc24.c            # terminal (character-mode) version
 ├── gui/
-│   └── calc24_gui.c        # monolithic raylib GUI (single-file reference)
-├── modular/
-│   ├── main.c              # entry point, main loop, screen wiring
-│   ├── solver.h / .c       # brute-force 24 solver
-│   ├── parser.h / .c       # recursive-descent expression evaluator
-│   ├── game.h  / .c        # game rules, state machine, scoring
-│   ├── card.h  / .c        # card data, face-label helper, draw
-│   ├── ui.h    / .c        # reusable UI primitives (Button, Modal, TextBox)
-│   ├── screen_game.h / .c  # main playing screen (layout + event routing)
-│   └── screen_custom.h/.c  # custom-number modal screen
+│   ├── calc24_gui.c        # monolithic raylib GUI (single-file reference)
+│   └── modular/            # refactored architecture (lives inside gui/)
+│       ├── main.c          # entry point, main loop, screen wiring
+│       ├── solver.h / .c   # brute-force 24 solver
+│       ├── parser.h / .c   # recursive-descent expression evaluator
+│       ├── game.h  / .c    # game rules, state machine, scoring
+│       ├── card.h  / .c    # card data, face-label helper, draw
+│       ├── ui.h    / .c    # reusable UI primitives (Button, Modal, TextBox)
+│       ├── screen_game.h/.c# main playing screen (layout + event routing)
+│       └── screen_custom.h/.c  # custom-number modal screen
 ├── design/
 │   └── architecture.md     # this file
 └── Makefile

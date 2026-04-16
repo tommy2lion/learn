@@ -6,12 +6,12 @@
  *   - runs the main loop
  *   - dispatches to the appropriate screen based on g.state
  *
- * Build (from withC/):
+ * Build (from c/):
  *   gcc -O2 -std=c99 -Wall -Wextra \
- *       -I/c/msys64/mingw64/include -Imodular \
- *       modular/main.c modular/solver.c modular/parser.c \
- *       modular/card.c modular/ui.c modular/game.c \
- *       modular/screen_game.c modular/screen_custom.c \
+ *       -I/c/msys64/mingw64/include -Igui/modular \
+ *       gui/modular/main.c gui/modular/solver.c gui/modular/parser.c \
+ *       gui/modular/card.c gui/modular/ui.c gui/modular/game.c \
+ *       gui/modular/screen_game.c gui/modular/screen_custom.c \
  *       -o calc24_modular.exe -lm -lraylib -lopengl32 -lgdi32 -lwinmm
  */
 

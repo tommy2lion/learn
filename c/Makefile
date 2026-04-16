@@ -5,7 +5,7 @@ RAYLIB  = /c/msys64/mingw64/lib
 RAYLDFL = -lraylib -lopengl32 -lgdi32 -lwinmm
 
 # Modular edition sources
-MOD_DIR  = modular
+MOD_DIR  = gui/modular
 MOD_SRCS = $(MOD_DIR)/main.c         \
            $(MOD_DIR)/solver.c        \
            $(MOD_DIR)/parser.c        \
@@ -21,12 +21,12 @@ all: calc24 calc24_gui calc24_modular
 calc24: terminal/calc24.c
 	$(CC) $(CFLAGS) -o calc24.exe terminal/calc24.c -lm
 
-# ── Monolithic GUI (raylib) ──────────────────────────────────────────────────
+# ── Monolithic GUI (raylib) — single-file reference ──────────────────────────
 calc24_gui: gui/calc24_gui.c
 	$(CC) $(CFLAGS) -I$(RAYINC) -o calc24_gui.exe gui/calc24_gui.c \
 	    -L$(RAYLIB) $(RAYLDFL)
 
-# ── Modular GUI (raylib) ─────────────────────────────────────────────────────
+# ── Modular GUI (raylib) — refactored architecture ───────────────────────────
 calc24_modular: $(MOD_SRCS)
 	$(CC) $(CFLAGS) -I$(RAYINC) -I$(MOD_DIR) -o calc24_modular.exe \
 	    $(MOD_SRCS) -lm -L$(RAYLIB) $(RAYLDFL)
