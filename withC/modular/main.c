@@ -8,10 +8,10 @@
  *
  * Build (from withC/):
  *   gcc -O2 -std=c99 -Wall -Wextra \
- *       -I/c/msys64/mingw64/include -Isrc \
- *       src/main.c src/solver.c src/parser.c \
- *       src/card.c src/ui.c src/game.c \
- *       src/screen_game.c src/screen_custom.c \
+ *       -I/c/msys64/mingw64/include -Imodular \
+ *       modular/main.c modular/solver.c modular/parser.c \
+ *       modular/card.c modular/ui.c modular/game.c \
+ *       modular/screen_game.c modular/screen_custom.c \
  *       -o calc24_modular.exe -lm -lraylib -lopengl32 -lgdi32 -lwinmm
  */
 

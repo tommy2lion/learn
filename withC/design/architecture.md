@@ -17,7 +17,11 @@ The refactoring goal is **separation of concerns**: each module owns one thing, 
 
 ```
 withC/
-├── src/
+├── terminal/
+│   └── calc24.c            # terminal (character-mode) version
+├── gui/
+│   └── calc24_gui.c        # monolithic raylib GUI (single-file reference)
+├── modular/
 │   ├── main.c              # entry point, main loop, screen wiring
 │   ├── solver.h / .c       # brute-force 24 solver
 │   ├── parser.h / .c       # recursive-descent expression evaluator
@@ -28,8 +32,6 @@ withC/
 │   └── screen_custom.h/.c  # custom-number modal screen
 ├── design/
 │   └── architecture.md     # this file
-├── calc24.c                # original terminal version (unchanged)
-├── calc24_gui.c            # original monolithic GUI (kept for reference)
 └── Makefile
 ```
 
