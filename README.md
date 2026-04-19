@@ -1,19 +1,33 @@
-# Calc 24
+# zeroF / test
 
-Four implementations of the classic "Make 24" card game, where you use any arithmetic operators to combine four numbers and reach 24.
+A collection of small puzzle games implemented in multiple languages and environments.
 
-## Implementations
+## Projects
 
-| # | Location | Tech | Description |
-|---|----------|------|-------------|
-| 1 | `webpage/index.html` | HTML / CSS / JS | Browser game; no build step |
+### Calc 24
+
+Classic "Make 24" card game — combine four numbers with arithmetic operators to reach 24.
+
+| # | Location | Tech | Notes |
+|---|----------|------|-------|
+| 1 | `webpage/index.html` | HTML / CSS / JS | Runs in any browser, no build step |
 | 2 | `c/terminal/calc24.c` | C99, gcc | ASCII card art, stdin/stdout |
 | 3 | `c/gui/calc24_gui.c` | C99, raylib | Monolithic graphical GUI |
 | 4 | `c/gui/modular/` | C99, raylib | Refactored 8-module architecture |
 
+**Rules:** Ace = 1, J = 11, Q = 12, K = 13. Use +, −, ×, ÷ and parentheses to reach exactly **24**.
+
+### Magic Square
+
+3×3 puzzle — place numbers 1–9 so every row, column, and diagonal sums to 15.
+
+| # | Location | Tech |
+|---|----------|------|
+| 1 | `magic square/terminal/magic_square.c` | C99, gcc |
+
 ## Quick Start
 
-### Web
+### Web (Calc 24)
 Open `webpage/index.html` in any browser.
 
 ### C builds (requires [MSYS2](https://www.msys2.org/) + raylib)
@@ -22,33 +36,32 @@ Open `webpage/index.html` in any browser.
 # Install raylib once
 pacman -S mingw-w64-x86_64-raylib
 
-# Build all targets from the c/ directory
+# Build all Calc 24 targets
 cd c
 make
 
-# Run individually
 ./calc24.exe           # terminal
 ./calc24_gui.exe       # monolithic GUI
 ./calc24_modular.exe   # modular GUI
+
+# Build Magic Square
+cd "magic square/terminal"
+gcc magic_square.c -o magic_square
+./magic_square
 ```
 
-## Modular Architecture
-
-The modular edition (`c/gui/modular/`) demonstrates clean separation of concerns:
+## Repository Layout
 
 ```
-solver / parser / game  ──  pure logic, no raylib, fully testable
-card / ui               ──  rendering primitives
-screen_game / screen_custom  ──  layout + event routing
-main                    ──  coordinator only (~55 lines)
+test/
+├── webpage/                  # Web version of Calc 24
+├── c/                        # C implementations of Calc 24
+│   ├── Makefile
+│   ├── terminal/             # stdin/stdout version
+│   ├── gui/
+│   │   ├── calc24_gui.c      # monolithic GUI
+│   │   └── modular/          # 8-module refactor
+│   └── design/               # architecture docs
+└── magic square/
+    └── terminal/             # CLI magic square game
 ```
-
-Design patterns used: Module, State Machine, Component, Strategy, Data-Driven.  
-See `c/design/architecture.md` for the full design document.
-
-## Rules
-
-- Four cards are dealt (Ace = 1, J = 11, Q = 12, K = 13).
-- Use +, −, ×, ÷ and parentheses to reach exactly **24**.
-- Click a card to insert its value, then click an operator.
-- Press **CHECK** to evaluate, **HINT** for a solution, **NEW** to skip, **CUSTOM** to set your own numbers.
