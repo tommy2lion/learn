@@ -8,7 +8,7 @@ This document describes a step‑by‑step development plan for building an inte
 
 ## Phase 1 — Project Skeleton
 
-1. Create `magic_square/gui/` with an empty `magic_square_gui.c` and a `Makefile` mirroring `c/Makefile`. Compile the empty project to prove raylib links correctly.
+1. Create `magic-square/gui/` with an empty `magic_square_gui.c` and a `Makefile` mirroring `c/Makefile`. Compile the empty project to prove raylib links correctly.
 2. Add a minimal `main()` that:
    - Opens a raylib window
    - Sets up a 3D camera with `BeginMode3D`
@@ -35,7 +35,7 @@ This document describes a step‑by‑step development plan for building an inte
 
 ## Phase 3 — Static 3D Rendering
 
-6. Render the 27 cubies as `DrawCube` / `DrawCubeWires` at their grid positions. Hide internal faces.
+6. Render the 27 cubies as `DrawCube` / `DrawCubeWires` at their grid positions. `DrawCube` is solid so there are no exposed internal faces; just skip drawing sticker quads on any cubie face that points inward (i.e. toward an adjacent cubie rather than toward the outside of the 3×3×3 block).
 7. Color each visible sticker from the sticker array. The tricky part: map `(face, row, col)` → world‑space quad.  
    Draw the sticker as a slightly‑inset colored quad on the cubie's face so black gaps show between stickers (the classic Rubik's look).
 8. Add an orbit camera controlled by:
@@ -59,7 +59,7 @@ This document describes a step‑by‑step development plan for building an inte
 12. Keyboard bindings:
     - `U D L R F B` for clockwise turns
     - `Shift+letter` for counter‑clockwise
-    - Number keys for double turns (e.g. `2` for U2)
+    - Press the same letter twice for a double turn (e.g. `U U` = U2); no separate binding needed
     - `SPACE` = scramble
     - `ENTER` = reset
     - `Z / Y` = undo / redo
