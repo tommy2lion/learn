@@ -10,10 +10,10 @@ Classic "Make 24" card game — combine four numbers with arithmetic operators t
 
 | # | Location | Tech | Notes |
 |---|----------|------|-------|
-| 1 | `webpage/index.html` | HTML / CSS / JS | Runs in any browser, no build step |
-| 2 | `c/terminal/calc24.c` | C99, gcc | ASCII card art, stdin/stdout |
-| 3 | `c/gui/calc24_gui.c` | C99, raylib | Monolithic graphical GUI |
-| 4 | `c/gui/modular/` | C99, raylib | Refactored 8-module architecture |
+| 1 | `to24-webpage/index.html` | HTML / CSS / JS | Runs in any browser, no build step |
+| 2 | `to24/terminal/calc24.c` | C99, gcc | ASCII card art, stdin/stdout |
+| 3 | `to24/gui/calc24_gui.c` | C99, raylib | Monolithic graphical GUI |
+| 4 | `to24/gui/modular/` | C99, raylib | Refactored 8-module architecture |
 
 **Rules:** Ace = 1, J = 11, Q = 12, K = 13. Use +, −, ×, ÷ and parentheses to reach exactly **24**.
 
@@ -52,7 +52,7 @@ Timer starts on the first move and stops when the cube is solved — a **SOLVED!
 ## Quick Start
 
 ### Web (Calc 24)
-Open `webpage/index.html` in any browser.
+Open `to24-webpage/index.html` in any browser.
 
 ### C builds (requires [MSYS2](https://www.msys2.org/) + raylib)
 
@@ -61,7 +61,7 @@ Open `webpage/index.html` in any browser.
 pacman -S mingw-w64-x86_64-raylib
 
 # Build all Calc 24 targets
-cd c
+cd to24
 make
 
 ./calc24.exe           # terminal
@@ -69,7 +69,7 @@ make
 ./calc24_modular.exe   # modular GUI
 
 # Build Magic Square (terminal)
-cd "magic-square/terminal"
+cd magic-square/terminal
 gcc magic_square.c -o magic_square
 ./magic_square
 
@@ -83,8 +83,8 @@ make
 
 ```
 test/
-├── webpage/                  # Web version of Calc 24
-├── c/                        # C implementations of Calc 24
+├── to24-webpage/             # Web version of Calc 24
+├── to24/                     # C implementations of Calc 24
 │   ├── Makefile
 │   ├── terminal/             # stdin/stdout version
 │   ├── gui/
