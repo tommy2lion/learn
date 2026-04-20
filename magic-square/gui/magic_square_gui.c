@@ -73,7 +73,8 @@ static void sticker_to_cubie(int f, int row, int col,
 #define FACE_OFF      0.46f
 #define STICKER_HALF  0.38f
 #define STICKER_LIFT  0.002f
-#define ANIM_SPEED   300.0f
+#define ANIM_SPEED          300.0f
+#define CLICK_DRAG_THRESHOLD  5.0f
 
 static void draw_sticker(Vector3 fc, Vector3 sr, Vector3 su,
                          float half, Color col)
@@ -227,6 +228,43 @@ static void hist_record(History *h, int move)
     }
 }
 
+/* ── mouse picking ───────────────────────────────────────────────── */
+typedef struct { float drag_dist; } MousePick;
+
+/* Returns front-facing face index 0-5 hit by ray, or -1 on miss.
+ * Tests 6 axis-aligned planes at ±1.46 (= 1.0 + FACE_OFF).
+ * Back-face culling guarantees only the visible face is returned. */
+static int pick_face(Ray ray)
+{
+    static const struct { int axis; float K, ns; } PL[6] = {
+        { 1, +1.46f, +1.0f },  /* U_FACE */
+        { 1, -1.46f, -1.0f },  /* D_FACE */
+        { 0, -1.46f, -1.0f },  /* L_FACE */
+        { 0, +1.46f, +1.0f },  /* R_FACE */
+        { 2, +1.46f, +1.0f },  /* F_FACE */
+        { 2, -1.46f, -1.0f },  /* B_FACE */
+    };
+    float orig[3] = { ray.position.x,  ray.position.y,  ray.position.z  };
+    float dir[3]  = { ray.direction.x, ray.direction.y, ray.direction.z };
+    float best_t  = 1e30f;
+    int   best    = -1;
+
+    for (int f = 0; f < 6; f++) {
+        int   a  = PL[f].axis;
+        float K  = PL[f].K;
+        float ns = PL[f].ns;
+        if (dir[a] * ns >= 0.0f) continue;          /* back-face cull */
+        float t = (K - orig[a]) / dir[a];
+        if (t < 1e-4f) continue;
+        float h[3] = { orig[0]+t*dir[0], orig[1]+t*dir[1], orig[2]+t*dir[2] };
+        int t1 = (a+1)%3, t2 = (a+2)%3;
+        if (h[t1] < -1.5f || h[t1] > 1.5f) continue;
+        if (h[t2] < -1.5f || h[t2] > 1.5f) continue;
+        if (t < best_t) { best_t = t; best = f; }
+    }
+    return best;
+}
+
 /* ── animation ───────────────────────────────────────────────────── */
 typedef struct {
     int   move;
@@ -318,7 +356,8 @@ int main(void)
     Queue   queue = { 0 };
     History hist  = { 0 };
     Anim    anim  = { .active = false };
-    Timer   timer = { .state = TIMER_IDLE };
+    Timer     timer = { .state = TIMER_IDLE };
+    MousePick mpick = { 0 };
 
     OrbitCam oc = { .radius = 7.0f, .azimuth = 0.6f, .elevation = 0.5f };
     Camera3D camera = {
@@ -365,6 +404,25 @@ int main(void)
             anim.active = false;
             hist_clear(&hist);
             timer = (Timer){ TIMER_IDLE, 0, 0 };
+        }
+
+        /* ── mouse picking ──────────────────────────────────────── */
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            mpick.drag_dist = 0.0f;
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            Vector2 d = GetMouseDelta();
+            mpick.drag_dist += sqrtf(d.x*d.x + d.y*d.y);
+        }
+        if (idle) {
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)
+                && mpick.drag_dist < CLICK_DRAG_THRESHOLD) {
+                int f = pick_face(GetMouseRay(GetMousePosition(), camera));
+                if (f >= 0) queue_push(&queue, f * 3);
+            }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+                int f = pick_face(GetMouseRay(GetMousePosition(), camera));
+                if (f >= 0) queue_push(&queue, f * 3 + 1);
+            }
         }
 
         /* ── dequeue → animation ────────────────────────────────── */
@@ -447,7 +505,8 @@ int main(void)
 
             /* bottom legend */
             DrawText("U/D/L/R/F/B (Shift=CCW)  Z: undo  Y: redo  "
-                     "SPACE: scramble  ENTER: reset  Drag: orbit  Scroll: zoom",
+                     "SPACE: scramble  ENTER: reset  "
+                     "LClick: CW  RClick: CCW  Drag: orbit  Scroll: zoom",
                      10, SCREEN_H - 24, 13, DARKGRAY);
         EndDrawing();
     }
