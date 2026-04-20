@@ -1,0 +1,27 @@
+test/
+├── .gitignore
+├── tree.txt                          # this file — project structure overview
+│
+├── webpage/                          # ① Web version (HTML / CSS / JS)
+│   └── index.html                    #   Calc 24 game running in the browser
+│
+└── c/                                # C implementations
+    ├── Makefile                      #   builds all three targets
+    │
+    ├── terminal/                     # ② Character-mode version
+    │   └── calc24.c                  #   ASCII cards, stdin/stdout, single file
+    │
+    ├── gui/                          # ③ & ④ Graphical versions (raylib)
+    │   ├── calc24_gui.c              #   monolithic single-file GUI (reference)
+    │   └── modular/                  #   refactored architecture (8 modules)
+    │       ├── main.c                #   entry point & main loop (~55 lines)
+    │       ├── solver.h / solver.c   #   brute-force 24 solver  (no raylib)
+    │       ├── parser.h / parser.c   #   expression evaluator   (no raylib)
+    │       ├── game.h   / game.c     #   rules & state machine  (no raylib)
+    │       ├── card.h   / card.c     #   card label + draw
+    │       ├── ui.h     / ui.c       #   reusable widgets (Button, TextBox)
+    │       ├── screen_game.h / .c    #   main play screen layout & events
+    │       └── screen_custom.h / .c  #   custom-number modal screen
+    │
+    └── design/                       # Architecture documentation
+        └── architecture.md           #   modularisation design & patterns

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>24 Game</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #f5c518;
+      text-shadow: 0 0 20px rgba(245,197,24,0.4);
+    }
+
+    .subtitle {
+      font-size: 0.95rem;
+      color: #aaa;
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.5;
+    }
+
+    /* Cards */
+    .cards {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .card {
+      width: 80px;
+      height: 110px;
+      background: #fff;
+      color: #1a1a2e;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      font-weight: 900;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+      user-select: none;
+      position: relative;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 28px rgba(0,0,0,0.6);
+    }
+
+    .card.used {
+      background: #555;
+      color: #888;
+      cursor: default;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .card .suit {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      font-size: 0.85rem;
+      line-height: 1;
+    }
+    .card .suit-br {
+      position: absolute;
+      bottom: 6px;
+      right: 8px;
+      font-size: 0.85rem;
+      transform: rotate(180deg);
+      line-height: 1;
+    }
+
+    /* Expression builder */
+    .expr-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .expr-display {
+      background: #0f3460;
+      border: 2px solid #16213e;
+      border-radius: 10px;
+      width: 100%;
+      padding: 14px 18px;
+      font-size: 1.5rem;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 1px;
+      min-height: 56px;
+      color: #f5c518;
+      word-break: break-all;
+    }
+
+    .expr-display.error { border-color: #e74c3c; color: #e74c3c; }
+    .expr-display.success { border-color: #2ecc71; color: #2ecc71; }
+
+    /* Operator buttons */
+    .ops {
+      display: flex;
+      gap: 10px;
+    }
+
+    .op-btn {
+      width: 52px;
+      height: 52px;
+      border: none;
+      border-radius: 10px;
+      background: #16213e;
+      color: #f5c518;
+      font-size: 1.5rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      border: 2px solid #0f3460;
+    }
+
+    .op-btn:hover { background: #0f3460; transform: scale(1.08); }
+    .op-btn:active { transform: scale(0.96); }
+
+    .op-btn.paren { color: #aaa; font-size: 1.3rem; }
+
+    /* Action buttons */
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button.action {
+      padding: 10px 22px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button.action:hover { opacity: 0.85; transform: scale(1.04); }
+    button.action:active { transform: scale(0.97); }
+
+    .btn-check  { background: #f5c518; color: #1a1a2e; }
+    .btn-clear  { background: #e74c3c; color: #fff; }
+    .btn-back   { background: #555;    color: #fff; }
+    .btn-new    { background: #2ecc71; color: #1a1a2e; }
+    .btn-hint   { background: #9b59b6; color: #fff; }
+
+    /* Message */
+    .message {
+      font-size: 1.2rem;
+      font-weight: 700;
+      min-height: 1.6rem;
+      text-align: center;
+      transition: color 0.3s;
+    }
+    .message.ok  { color: #2ecc71; }
+    .message.err { color: #e74c3c; }
+    .message.info{ color: #f5c518; }
+
+    /* Score */
+    .score-bar {
+      display: flex;
+      gap: 28px;
+      font-size: 0.95rem;
+      color: #aaa;
+    }
+    .score-bar span b { color: #f5c518; }
+
+    /* Hint */
+    .hint-box {
+      background: #0f3460;
+      border: 1px solid #16213e;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 0.95rem;
+      color: #ccc;
+      max-width: 440px;
+      text-align: center;
+      display: none;
+    }
+    .hint-box.show { display: block; }
+
+    /* How-to */
+    .how-to {
+      font-size: 0.82rem;
+      color: #666;
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<h1>✦ 24 GAME</h1>
+<p class="subtitle">Use all 4 numbers with + − × ÷ (and parentheses) to make <b>24</b>.<br>Click a card to insert it into your expression.</p>
+
+<div class="score-bar">
+  <span>Solved: <b id="solved">0</b></span>
+  <span>Skipped: <b id="skipped">0</b></span>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="expr-area">
+  <div class="expr-display" id="exprDisplay">_</div>
+
+  <div class="ops">
+    <button class="op-btn" onclick="insertOp('+')">+</button>
+    <button class="op-btn" onclick="insertOp('−')">−</button>
+    <button class="op-btn" onclick="insertOp('×')">×</button>
+    <button class="op-btn" onclick="insertOp('÷')">÷</button>
+    <button class="op-btn paren" onclick="insertOp('(')"> ( </button>
+    <button class="op-btn paren" onclick="insertOp(')')"> ) </button>
+  </div>
+
+  <div class="actions">
+    <button class="action btn-back"  onclick="backspace()">⌫ Back</button>
+    <button class="action btn-clear" onclick="clearExpr()">✕ Clear</button>
+    <button class="action btn-check" onclick="checkAnswer()">✓ Check</button>
+    <button class="action btn-hint"  onclick="showHint()">? Hint</button>
+    <button class="action btn-new"   onclick="newGame()">↺ New</button>
+  </div>
+</div>
+
+<div class="message" id="message"></div>
+<div class="hint-box" id="hintBox"></div>
+
+<p class="how-to">Tip: click cards to insert numbers. Use ⌫ to undo, ✕ to reset.<br>Ace = 1, J = 11, Q = 12, K = 13.</p>
+
+<script>
+// ─── State ───────────────────────────────────────────────
+let numbers = [];      // current 4 numbers (1-13)
+let usedIdx = [];      // which card indices have been inserted
+let expr = [];         // token array: {type:'num'|'op', value, cardIdx?}
+let solved = 0, skipped = 0;
+
+const SUITS = ['♠','♥','♦','♣'];
+const FACE  = {1:'A',11:'J',12:'Q',13:'K'};
+const RED   = new Set(['♥','♦']);
+
+// ─── Init ────────────────────────────────────────────────
+function newGame() {
+  numbers = Array.from({length:4}, () => Math.ceil(Math.random()*13));
+  usedIdx = [];
+  expr = [];
+  document.getElementById('hintBox').classList.remove('show');
+  setMessage('');
+  renderCards();
+  renderExpr();
+}
+
+// ─── Render cards ─────────────────────────────────────────
+function renderCards() {
+  const suits = numbers.map(() => SUITS[Math.floor(Math.random()*4)]);
+  const el = document.getElementById('cards');
+  el.innerHTML = '';
+  numbers.forEach((n, i) => {
+    const div = document.createElement('div');
+    div.className = 'card' + (usedIdx.includes(i) ? ' used' : '');
+    const suit = suits[i];
+    const label = FACE[n] || n;
+    const color = RED.has(suit) ? '#c0392b' : '#1a1a2e';
+    div.style.color = color;
+    div.innerHTML = `<span class="suit">${label}<br>${suit}</span>
+                     <span style="font-size:2rem">${label}</span>
+                     <span class="suit-br">${label}<br>${suit}</span>`;
+    if (!usedIdx.includes(i)) {
+      div.onclick = () => insertNumber(i);
+    }
+    el.appendChild(div);
+  });
+}
+
+// ─── Expression helpers ───────────────────────────────────
+function insertNumber(idx) {
+  if (usedIdx.includes(idx)) return;
+  usedIdx.push(idx);
+  expr.push({type:'num', value: String(numbers[idx]), cardIdx: idx});
+  setMessage('');
+  renderCards();
+  renderExpr();
+}
+
+function insertOp(op) {
+  expr.push({type:'op', value: op});
+  setMessage('');
+  renderExpr();
+}
+
+function backspace() {
+  if (!expr.length) return;
+  const last = expr.pop();
+  if (last.type === 'num' && last.cardIdx !== undefined) {
+    usedIdx = usedIdx.filter(i => i !== last.cardIdx);
+    renderCards();
+  }
+  setMessage('');
+  renderExpr();
+}
+
+function clearExpr() {
+  expr = [];
+  usedIdx = [];
+  setMessage('');
+  renderCards();
+  renderExpr();
+}
+
+function renderExpr() {
+  const disp = document.getElementById('exprDisplay');
+  disp.className = 'expr-display';
+  const text = expr.map(t => t.value).join(' ') || '_';
+  disp.textContent = text;
+}
+
+// ─── Evaluate ─────────────────────────────────────────────
+function toJSExpr(tokens) {
+  return tokens.map(t => {
+    if (t.type === 'op') {
+      if (t.value === '−') return '-';
+      if (t.value === '×') return '*';
+      if (t.value === '÷') return '/';
+      return t.value; // ( )
+    }
+    return t.value;
+  }).join(' ');
+}
+
+function checkAnswer() {
+  // Must use all 4 numbers
+  if (usedIdx.length !== 4) {
+    setMessage('Use all 4 numbers!', 'err');
+    return;
+  }
+
+  const jsExpr = toJSExpr(expr);
+
+  let result;
+  try {
+    // Safe eval: only allow digits, spaces, operators, parens
+    if (!/^[\d\s\+\-\*\/\(\)\.]+$/.test(jsExpr)) throw new Error('invalid');
+    result = Function('"use strict"; return (' + jsExpr + ')')();
+  } catch(e) {
+    setMessage('Invalid expression!', 'err');
+    document.getElementById('exprDisplay').className = 'expr-display error';
+    return;
+  }
+
+  if (Math.abs(result - 24) < 1e-9) {
+    solved++;
+    document.getElementById('solved').textContent = solved;
+    setMessage('Correct! = 24 🎉', 'ok');
+    document.getElementById('exprDisplay').className = 'expr-display success';
+    document.getElementById('hintBox').classList.remove('show');
+    setTimeout(() => newGame(), 1800);
+  } else {
+    setMessage(`= ${+result.toFixed(6)}, not 24. Try again!`, 'err');
+    document.getElementById('exprDisplay').className = 'expr-display error';
+  }
+}
+
+// ─── Hint / Solver ────────────────────────────────────────
+function showHint() {
+  const sol = solve(numbers);
+  const box = document.getElementById('hintBox');
+  if (sol) {
+    box.textContent = '💡 One solution: ' + sol;
+  } else {
+    box.textContent = '😔 No solution exists for these numbers.';
+    skipped++;
+    document.getElementById('skipped').textContent = skipped;
+    setTimeout(() => newGame(), 1500);
+  }
+  box.classList.add('show');
+}
+
+function solve(nums) {
+  // Generate all permutations of nums
+  const perms = permutations(nums);
+  const ops = ['+','-','*','/'];
+  // 5 parenthesis structures for 4 numbers a,b,c,d:
+  // ((a op b) op c) op d
+  // (a op (b op c)) op d
+  // (a op b) op (c op d)
+  // a op ((b op c) op d)
+  // a op (b op (c op d))
+  const structures = [
+    ([a,b,c,d],[o1,o2,o3]) => apply(apply(apply(a,b,o1),c,o2),d,o3),
+    ([a,b,c,d],[o1,o2,o3]) => apply(apply(a,apply(b,c,o1),o2),d,o3),
+    ([a,b,c,d],[o1,o2,o3]) => apply(apply(a,b,o1),apply(c,d,o2),o3),
+    ([a,b,c,d],[o1,o2,o3]) => apply(a,apply(apply(b,c,o1),d,o2),o3),
+    ([a,b,c,d],[o1,o2,o3]) => apply(a,apply(b,apply(c,d,o1),o2),o3),
+  ];
+  const strLabels = [
+    ([a,b,c,d],[o1,o2,o3]) => `((${a}${o1}${b})${o2}${c})${o3}${d}`,
+    ([a,b,c,d],[o1,o2,o3]) => `(${a}${o1}(${b}${o2}${c}))${o3}${d}`,
+    ([a,b,c,d],[o1,o2,o3]) => `(${a}${o1}${b})${o2}(${c}${o3}${d})`,
+    ([a,b,c,d],[o1,o2,o3]) => `${a}${o1}((${b}${o2}${c})${o3}${d})`,
+    ([a,b,c,d],[o1,o2,o3]) => `${a}${o1}(${b}${o2}(${c}${o3}${d}))`,
+  ];
+
+  for (const perm of perms) {
+    for (const o1 of ops) for (const o2 of ops) for (const o3 of ops) {
+      for (let s = 0; s < structures.length; s++) {
+        const val = structures[s](perm, [o1,o2,o3]);
+        if (val !== null && Math.abs(val - 24) < 1e-9) {
+          return strLabels[s](perm, [opSym(o1),opSym(o2),opSym(o3)]);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function apply(a, b, op) {
+  if (a === null || b === null) return null;
+  if (op === '+') return a + b;
+  if (op === '-') return a - b;
+  if (op === '*') return a * b;
+  if (op === '/') return b === 0 ? null : a / b;
+  return null;
+}
+
+function opSym(op) {
+  return op === '*' ? '×' : op === '/' ? '÷' : op;
+}
+
+function permutations(arr) {
+  if (arr.length <= 1) return [arr];
+  const result = [];
+  arr.forEach((v, i) => {
+    const rest = arr.filter((_, j) => j !== i);
+    permutations(rest).forEach(p => result.push([v, ...p]));
+  });
+  return result;
+}
+
+// ─── Message ─────────────────────────────────────────────
+function setMessage(text, type='') {
+  const el = document.getElementById('message');
+  el.textContent = text;
+  el.className = 'message' + (type ? ' ' + type : '');
+}
+
+// ─── Start ───────────────────────────────────────────────
+newGame();
+</script>
+</body>
+</html>
