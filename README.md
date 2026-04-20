@@ -23,7 +23,31 @@ Classic "Make 24" card game — combine four numbers with arithmetic operators t
 
 | # | Location | Tech |
 |---|----------|------|
-| 1 | `magic square/terminal/magic_square.c` | C99, gcc |
+| 1 | `magic-square/terminal/magic_square.c` | C99, gcc |
+
+### Rubik's Cube
+
+Interactive 3D Rubik's Cube with face-rotation animation, undo/redo, scramble, and a solve timer.
+
+| # | Location | Tech |
+|---|----------|------|
+| 1 | `magic-square/gui/magic_square_gui.c` | C99, raylib |
+
+**Controls:**
+
+| Key | Action |
+|-----|--------|
+| `U` `D` `L` `R` `F` `B` | Clockwise face turn |
+| `Shift` + letter | Counter-clockwise face turn |
+| `SPACE` | Scramble |
+| `ENTER` | Reset to solved state |
+| `Z` | Undo last move |
+| `Y` | Redo |
+| Mouse drag | Orbit camera |
+| Scroll wheel | Zoom |
+
+**HUD:** move counter (top-left), timer (top-right), control legend (bottom).  
+Timer starts on the first move and stops when the cube is solved — a **SOLVED!** banner with the final time is displayed at the center.
 
 ## Quick Start
 
@@ -44,10 +68,15 @@ make
 ./calc24_gui.exe       # monolithic GUI
 ./calc24_modular.exe   # modular GUI
 
-# Build Magic Square
-cd "magic square/terminal"
+# Build Magic Square (terminal)
+cd "magic-square/terminal"
 gcc magic_square.c -o magic_square
 ./magic_square
+
+# Build Rubik's Cube GUI
+cd magic-square/gui
+make
+./magic_square_gui.exe
 ```
 
 ## Repository Layout
@@ -62,6 +91,7 @@ test/
 │   │   ├── calc24_gui.c      # monolithic GUI
 │   │   └── modular/          # 8-module refactor
 │   └── design/               # architecture docs
-└── magic square/
-    └── terminal/             # CLI magic square game
+└── magic-square/
+    ├── terminal/             # CLI magic square game
+    └── gui/                  # 3D Rubik's Cube GUI (raylib)
 ```
