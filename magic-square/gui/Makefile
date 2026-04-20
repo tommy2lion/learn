@@ -8,13 +8,20 @@ RAYINC  = /c/msys64/mingw64/include
 RAYLIB  = /c/msys64/mingw64/lib
 RAYLDFL = -lraylib -lopengl32 -lgdi32 -lwinmm
 
-all: magic_square_gui
+all: magic_square_gui cube_test
 
 magic_square_gui: magic_square_gui.c
 	$(CC) $(CFLAGS) -I$(RAYINC) -o magic_square_gui.exe magic_square_gui.c \
 	    -L$(RAYLIB) $(RAYLDFL)
 
-clean:
-	rm -f magic_square_gui.exe
+# Cube data model + unit tests (no raylib needed).
+cube_test: cube.c cube_test.c cube.h
+	$(CC) $(CFLAGS) cube.c cube_test.c -o cube_test.exe
 
-.PHONY: all clean
+test: cube_test
+	./cube_test.exe
+
+clean:
+	rm -f magic_square_gui.exe cube_test.exe cube_test *.o
+
+.PHONY: all clean test
