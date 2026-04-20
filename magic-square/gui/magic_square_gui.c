@@ -1,19 +1,16 @@
 /*
- * magic_square_gui.c – Phase 5: full input + undo/redo.
+ * magic_square_gui.c – Phase 6: HUD polish + timer + SOLVED banner.
  *
- * History stack: every user-initiated move is recorded on animation
- * commit.  Undo/redo animate the inverse/original move but do NOT
- * modify the history cursor until they complete, so cancelling with
- * ENTER always leaves the state consistent.
+ * Timer: starts on the first committed user move, stops when the cube
+ * becomes solved.  SPACE / ENTER reset the timer.
  *
  * Keys:
  *   U / D / L / R / F / B   – clockwise quarter-turn
  *   Shift + letter           – counter-clockwise quarter-turn
- *   (press same letter twice to get a 180° turn via the queue)
- *   Z                        – undo last move (animated)
- *   Y                        – redo (animated)
- *   SPACE                    – random 20-move scramble (clears history)
- *   ENTER                    – reset to solved  (clears history)
+ *   Z                        – undo  (animated)
+ *   Y                        – redo  (animated)
+ *   SPACE                    – random 20-move scramble (resets timer)
+ *   ENTER                    – reset to solved          (resets timer)
  *   ESC                      – quit
  * Camera: left-drag to orbit, scroll to zoom.
  */
@@ -48,7 +45,6 @@ static const struct {
     {  0,  0, -1,   -1, 0,  0,    0, +1,  0 },  /* B */
 };
 
-/* Rotation axis and CW base-angle per face (verified against cube.c). */
 static const struct { float ax, ay, az, cw; } FACE_ROT[6] = {
     { 0, 1, 0,  90.0f },   /* U */
     { 0, 1, 0,  90.0f },   /* D */
@@ -118,13 +114,12 @@ static bool in_layer(int face_idx, int cx, int cy, int cz)
 
 static void draw_cube_state(const Cube *cube, int anim_face, float anim_angle)
 {
-    bool  anim  = (anim_face >= 0);
-    float ax    = anim ? FACE_ROT[anim_face].ax : 0;
-    float ay    = anim ? FACE_ROT[anim_face].ay : 0;
-    float az    = anim ? FACE_ROT[anim_face].az : 0;
-    float lift  = FACE_OFF + STICKER_LIFT;
+    bool  anim = (anim_face >= 0);
+    float ax   = anim ? FACE_ROT[anim_face].ax : 0;
+    float ay   = anim ? FACE_ROT[anim_face].ay : 0;
+    float az   = anim ? FACE_ROT[anim_face].az : 0;
+    float lift = FACE_OFF + STICKER_LIFT;
 
-    /* pass 1: static cubies */
     for (int cx = -1; cx <= 1; cx++)
         for (int cy = -1; cy <= 1; cy++)
             for (int cz = -1; cz <= 1; cz++)
@@ -132,7 +127,6 @@ static void draw_cube_state(const Cube *cube, int anim_face, float anim_angle)
                     DrawCube((Vector3){(float)cx,(float)cy,(float)cz},
                              CUBIE_SIZE, CUBIE_SIZE, CUBIE_SIZE, BLACK);
 
-    /* pass 2: rotating cubies */
     if (anim) {
         rlPushMatrix();
             rlRotatef(anim_angle, ax, ay, az);
@@ -147,7 +141,6 @@ static void draw_cube_state(const Cube *cube, int anim_face, float anim_angle)
 
     rlDisableBackfaceCulling();
 
-    /* pass 3: static stickers */
     for (int f = 0; f < 6; f++) {
         Vector3 normal = { (float)FACE[f].nx,(float)FACE[f].ny,(float)FACE[f].nz };
         Vector3 sr = { FACE[f].srx, FACE[f].sry, FACE[f].srz };
@@ -166,7 +159,6 @@ static void draw_cube_state(const Cube *cube, int anim_face, float anim_angle)
         }
     }
 
-    /* pass 4: rotating stickers */
     if (anim) {
         rlPushMatrix();
             rlRotatef(anim_angle, ax, ay, az);
@@ -216,12 +208,7 @@ static int queue_pop(Queue *q)
     return move;
 }
 
-/* ── history (undo/redo) ─────────────────────────────────────────
- *
- * moves[0..pos-1] have been applied to the cube.
- * moves[pos..len-1] are undone (available for redo).
- * Recording a new move truncates any redo branch (sets len = pos).
- * ────────────────────────────────────────────────────────────────*/
+/* ── history ─────────────────────────────────────────────────────── */
 #define HIST_CAP 512
 
 typedef struct {
@@ -229,23 +216,18 @@ typedef struct {
     int len, pos;
 } History;
 
-static void hist_clear(History *h)         { h->len = h->pos = 0; }
+static void hist_clear(History *h)  { h->len = h->pos = 0; }
 
-/* Record a committed user move.  Truncates redo branch first. */
 static void hist_record(History *h, int move)
 {
-    h->len = h->pos;               /* discard any redo future */
+    h->len = h->pos;
     if (h->pos < HIST_CAP) {
         h->moves[h->pos++] = move;
         h->len = h->pos;
     }
 }
 
-/* ── animation state ─────────────────────────────────────────────
- *
- * record=true  → on commit, call hist_record (user-initiated move)
- * record=false → on commit, just cube_apply  (undo / redo move)
- * ────────────────────────────────────────────────────────────────*/
+/* ── animation ───────────────────────────────────────────────────── */
 typedef struct {
     int   move;
     float angle, target;
@@ -254,9 +236,9 @@ typedef struct {
 
 static void anim_start(Anim *a, int move, bool record)
 {
-    int   face    = move / 3;
-    int   kind    = move % 3;
-    float cw      = FACE_ROT[face].cw;
+    int   face = move / 3;
+    int   kind = move % 3;
+    float cw   = FACE_ROT[face].cw;
     float targets[3] = { cw, -cw, cw * 2.0f };
     a->move   = move;
     a->angle  = 0.0f;
@@ -265,7 +247,6 @@ static void anim_start(Anim *a, int move, bool record)
     a->record = record;
 }
 
-/* Advance animation by one frame; commits to cube+history on completion. */
 static void anim_update(Anim *a, Cube *cube, History *hist)
 {
     if (!a->active) return;
@@ -276,6 +257,31 @@ static void anim_update(Anim *a, Cube *cube, History *hist)
         if (a->record) hist_record(hist, a->move);
         a->active = false;
     }
+}
+
+/* ── timer ───────────────────────────────────────────────────────
+ *
+ * IDLE    – not yet started (shown as "−−−")
+ * RUNNING – counting up from first user move
+ * STOPPED – cube solved; shows final elapsed time
+ * ────────────────────────────────────────────────────────────────*/
+typedef enum { TIMER_IDLE, TIMER_RUNNING, TIMER_STOPPED } TimerState;
+
+typedef struct {
+    TimerState state;
+    double     start;    /* GetTime() when started */
+    double     elapsed;  /* final time when solved  */
+} Timer;
+
+/* Format seconds as  M:SS.cc  or  S.cc */
+static const char *fmt_time(double t)
+{
+    int mins = (int)(t / 60.0);
+    int secs = (int)(t) % 60;
+    int cs   = (int)(t * 100.0) % 100;
+    if (mins > 0)
+        return TextFormat("%d:%02d.%02d", mins, secs, cs);
+    return TextFormat("%d.%02d", secs, cs);
 }
 
 /* ── orbit camera ────────────────────────────────────────────────── */
@@ -308,10 +314,11 @@ int main(void)
     InitWindow(SCREEN_W, SCREEN_H, "Magic Square – Rubik's Cube");
     SetTargetFPS(60);
 
-    Cube    cube;    cube_reset(&cube);
-    Queue   queue  = { 0 };
-    History hist   = { 0 };
-    Anim    anim   = { .active = false };
+    Cube    cube;   cube_reset(&cube);
+    Queue   queue = { 0 };
+    History hist  = { 0 };
+    Anim    anim  = { .active = false };
+    Timer   timer = { .state = TIMER_IDLE };
 
     OrbitCam oc = { .radius = 7.0f, .azimuth = 0.6f, .elevation = 0.5f };
     Camera3D camera = {
@@ -332,46 +339,52 @@ int main(void)
         bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
         bool idle  = !anim.active && queue.count == 0;
 
-        /* face turns → queue (record=true, handled at dequeue) */
         for (int i = 0; i < 6; i++)
             if (IsKeyPressed(BINDS[i].key))
                 queue_push(&queue, shift ? BINDS[i].ccw : BINDS[i].cw);
 
-        /* undo: only when fully idle, cursor > 0 */
         if (IsKeyPressed(KEY_Z) && idle && hist.pos > 0) {
             hist.pos--;
             anim_start(&anim, cube_inverse(hist.moves[hist.pos]), false);
         }
-
-        /* redo: only when fully idle, cursor < len */
         if (IsKeyPressed(KEY_Y) && idle && hist.pos < hist.len) {
             anim_start(&anim, hist.moves[hist.pos], false);
             hist.pos++;
         }
-
-        /* scramble: instant, clears history */
         if (IsKeyPressed(KEY_SPACE)) {
             srand((unsigned)(GetTime() * 1000.0));
             cube_scramble(&cube, 20);
             queue.head = queue.count = 0;
             anim.active = false;
             hist_clear(&hist);
+            timer = (Timer){ TIMER_IDLE, 0, 0 };
         }
-
-        /* reset: clears everything */
         if (IsKeyPressed(KEY_ENTER)) {
             cube_reset(&cube);
             queue.head = queue.count = 0;
             anim.active = false;
             hist_clear(&hist);
+            timer = (Timer){ TIMER_IDLE, 0, 0 };
         }
 
         /* ── dequeue → animation ────────────────────────────────── */
         if (!anim.active && queue.count > 0)
             anim_start(&anim, queue_pop(&queue), true);
 
-        /* ── advance animation ──────────────────────────────────── */
+        /* ── advance animation; detect commit ───────────────────── */
+        bool was_active = anim.active;
+        bool was_record = anim.record;
         anim_update(&anim, &cube, &hist);
+        bool just_committed = was_active && !anim.active;
+
+        /* start timer on first committed user move */
+        if (just_committed && was_record && timer.state == TIMER_IDLE)
+            timer = (Timer){ TIMER_RUNNING, GetTime(), 0 };
+
+        /* stop timer when cube becomes solved */
+        if (timer.state == TIMER_RUNNING && cube_is_solved(&cube))
+            timer = (Timer){ TIMER_STOPPED, timer.start,
+                             GetTime() - timer.start };
 
         /* ── camera ─────────────────────────────────────────────── */
         orbit_update(&oc, &camera);
@@ -386,21 +399,56 @@ int main(void)
                                 anim.active ? anim.angle    :  0.0f);
             EndMode3D();
 
+            /* ── HUD ─────────────────────────────────────────────── */
             DrawFPS(10, 10);
 
             /* move counter */
-            DrawText(TextFormat("Moves: %d", hist.pos), 10, 36, 18, LIGHTGRAY);
+            DrawText(TextFormat("Moves: %d", hist.pos), 10, 36, 20, LIGHTGRAY);
 
-            /* undo/redo availability hint */
+            /* timer – top right */
+            {
+                const char *ts;
+                Color       tc;
+                if (timer.state == TIMER_IDLE) {
+                    ts = "---";
+                    tc = DARKGRAY;
+                } else if (timer.state == TIMER_RUNNING) {
+                    ts = fmt_time(GetTime() - timer.start);
+                    tc = WHITE;
+                } else {
+                    ts = fmt_time(timer.elapsed);
+                    tc = (Color){ 80, 220, 80, 255 };  /* green */
+                }
+                int tw = MeasureText(ts, 28);
+                DrawText(ts, SCREEN_W - tw - 12, 10, 28, tc);
+            }
+
+            /* SOLVED! banner – centre screen */
+            if (cube_is_solved(&cube) && timer.state == TIMER_STOPPED) {
+                const char *s1 = "SOLVED!";
+                const char *s2 = fmt_time(timer.elapsed);
+                int w1 = MeasureText(s1, 72);
+                int w2 = MeasureText(s2, 36);
+                int bx = (SCREEN_W - w1) / 2 - 20;
+                int bw = w1 + 40;
+                DrawRectangle(bx, SCREEN_H/2 - 72, bw, 120,
+                              (Color){ 0, 0, 0, 180 });
+                DrawText(s1, (SCREEN_W - w1) / 2, SCREEN_H/2 - 66, 72, YELLOW);
+                DrawText(s2, (SCREEN_W - w2) / 2, SCREEN_H/2 + 16, 36, WHITE);
+            }
+
+            /* undo / redo availability */
             if (hist.pos > 0)
-                DrawText(TextFormat("Z: undo (%d)", hist.pos), 10, 58, 16, GRAY);
+                DrawText(TextFormat("Z undo ×%d", hist.pos),
+                         10, 62, 14, DARKGRAY);
             if (hist.pos < hist.len)
-                DrawText(TextFormat("Y: redo (%d)", hist.len - hist.pos),
-                         150, 58, 16, GRAY);
+                DrawText(TextFormat("Y redo ×%d", hist.len - hist.pos),
+                         130, 62, 14, DARKGRAY);
 
+            /* bottom legend */
             DrawText("U/D/L/R/F/B (Shift=CCW)  Z: undo  Y: redo  "
                      "SPACE: scramble  ENTER: reset  Drag: orbit  Scroll: zoom",
-                     10, SCREEN_H - 26, 14, GRAY);
+                     10, SCREEN_H - 24, 13, DARKGRAY);
         EndDrawing();
     }
 
