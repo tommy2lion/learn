@@ -1,4 +1,6 @@
-# zeroF / test
+# learn_claude
+
+It's my first time using the claude code .
 
 A collection of small puzzle games implemented in multiple languages and environments.
 
