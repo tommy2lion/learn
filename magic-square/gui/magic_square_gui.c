@@ -1,16 +1,19 @@
 /*
- * magic_square_gui.c – Phase 4: face-rotation animation + move queue.
+ * magic_square_gui.c – Phase 5: full input + undo/redo.
  *
- * During animation the rotating layer is drawn inside rlPushMatrix /
- * rlRotatef / rlPopMatrix; all other cubies and stickers are drawn
- * normally.  When the angle reaches its target the move is committed
- * to the sticker model (cube_apply) and the next queued move starts.
+ * History stack: every user-initiated move is recorded on animation
+ * commit.  Undo/redo animate the inverse/original move but do NOT
+ * modify the history cursor until they complete, so cancelling with
+ * ENTER always leaves the state consistent.
  *
- * Keys (added here for testability; will be fully documented in Phase 5):
+ * Keys:
  *   U / D / L / R / F / B   – clockwise quarter-turn
  *   Shift + letter           – counter-clockwise quarter-turn
- *   SPACE                    – instant 20-move scramble
- *   ENTER                    – reset to solved
+ *   (press same letter twice to get a 180° turn via the queue)
+ *   Z                        – undo last move (animated)
+ *   Y                        – redo (animated)
+ *   SPACE                    – random 20-move scramble (clears history)
+ *   ENTER                    – reset to solved  (clears history)
  *   ESC                      – quit
  * Camera: left-drag to orbit, scroll to zoom.
  */
@@ -31,11 +34,11 @@ static const Color STICKER_COLOR[6] = {
     {   0,  81, 186, 255 },   /* 5 BLUE   – B */
 };
 
-/* ── face descriptors (rendering) ───────────────────────────────── */
+/* ── face descriptors ────────────────────────────────────────────── */
 static const struct {
     int   nx, ny, nz;
-    float srx, sry, srz;   /* right tangent: dir of increasing sticker col */
-    float sux, suy, suz;   /* up    tangent: dir of decreasing sticker row */
+    float srx, sry, srz;
+    float sux, suy, suz;
 } FACE[6] = {
     {  0, +1,  0,    1, 0,  0,    0,  0, -1 },  /* U */
     {  0, -1,  0,    1, 0,  0,    0,  0, +1 },  /* D */
@@ -45,18 +48,7 @@ static const struct {
     {  0,  0, -1,   -1, 0,  0,    0, +1,  0 },  /* B */
 };
 
-/*
- * Rotation axis and CW base-angle for each face.
- * Derived by cross-checking the visual "CW from outside" direction
- * against the permutation tables in cube.c (right-hand rule, Y-up):
- *
- *   U: Front→Right  = +90° around Y
- *   D: Left→Front   = +90° around Y  (same world direction as U CW)
- *   L: Back→Up      = +90° around X
- *   R: Front→Up     = -90° around X
- *   F: Right→Up     = -90° around Z
- *   B: Left→Up      = +90° around Z
- */
+/* Rotation axis and CW base-angle per face (verified against cube.c). */
 static const struct { float ax, ay, az, cw; } FACE_ROT[6] = {
     { 0, 1, 0,  90.0f },   /* U */
     { 0, 1, 0,  90.0f },   /* D */
@@ -66,7 +58,7 @@ static const struct { float ax, ay, az, cw; } FACE_ROT[6] = {
     { 0, 0, 1,  90.0f },   /* B */
 };
 
-/* ── sticker → cubie mapping ─────────────────────────────────────── */
+/* ── sticker → cubie ─────────────────────────────────────────────── */
 static void sticker_to_cubie(int f, int row, int col,
                               int *cx, int *cy, int *cz)
 {
@@ -80,12 +72,12 @@ static void sticker_to_cubie(int f, int row, int col,
     }
 }
 
-/* ── rendering constants ─────────────────────────────────────────── */
+/* ── rendering ───────────────────────────────────────────────────── */
 #define CUBIE_SIZE    0.92f
 #define FACE_OFF      0.46f
 #define STICKER_HALF  0.38f
 #define STICKER_LIFT  0.002f
-#define ANIM_SPEED   300.0f   /* degrees per second; 90° turn ≈ 0.3 s */
+#define ANIM_SPEED   300.0f
 
 static void draw_sticker(Vector3 fc, Vector3 sr, Vector3 su,
                          float half, Color col)
@@ -124,22 +116,9 @@ static bool in_layer(int face_idx, int cx, int cy, int cz)
     }
 }
 
-/*
- * draw_cube_state – render all 27 cubies and 54 stickers.
- *
- * anim_face: face index (0-5) of the layer currently rotating, or -1
- *            if no animation is active.
- * anim_angle: current rotation angle in degrees (ignored if anim_face < 0).
- *
- * Four render passes:
- *   1. Static cubies    (draw normally, skip rotating layer)
- *   2. Rotating cubies  (inside rlPushMatrix/rlRotatef/rlPopMatrix)
- *   3. Static stickers
- *   4. Rotating stickers (inside push/pop)
- */
 static void draw_cube_state(const Cube *cube, int anim_face, float anim_angle)
 {
-    bool anim   = (anim_face >= 0);
+    bool  anim  = (anim_face >= 0);
     float ax    = anim ? FACE_ROT[anim_face].ax : 0;
     float ay    = anim ? FACE_ROT[anim_face].ay : 0;
     float az    = anim ? FACE_ROT[anim_face].az : 0;
@@ -224,7 +203,7 @@ typedef struct {
 
 static void queue_push(Queue *q, int move)
 {
-    if (q->count >= QUEUE_CAP) return;   /* silently drop when full */
+    if (q->count >= QUEUE_CAP) return;
     q->data[(q->head + q->count) % QUEUE_CAP] = move;
     q->count++;
 }
@@ -237,34 +216,64 @@ static int queue_pop(Queue *q)
     return move;
 }
 
-/* ── animation state ─────────────────────────────────────────────── */
+/* ── history (undo/redo) ─────────────────────────────────────────
+ *
+ * moves[0..pos-1] have been applied to the cube.
+ * moves[pos..len-1] are undone (available for redo).
+ * Recording a new move truncates any redo branch (sets len = pos).
+ * ────────────────────────────────────────────────────────────────*/
+#define HIST_CAP 512
+
 typedef struct {
-    int   move;      /* the M_* move being animated          */
-    float angle;     /* current angle (degrees), starts at 0 */
-    float target;    /* final angle; sign gives direction     */
-    bool  active;
+    int moves[HIST_CAP];
+    int len, pos;
+} History;
+
+static void hist_clear(History *h)         { h->len = h->pos = 0; }
+
+/* Record a committed user move.  Truncates redo branch first. */
+static void hist_record(History *h, int move)
+{
+    h->len = h->pos;               /* discard any redo future */
+    if (h->pos < HIST_CAP) {
+        h->moves[h->pos++] = move;
+        h->len = h->pos;
+    }
+}
+
+/* ── animation state ─────────────────────────────────────────────
+ *
+ * record=true  → on commit, call hist_record (user-initiated move)
+ * record=false → on commit, just cube_apply  (undo / redo move)
+ * ────────────────────────────────────────────────────────────────*/
+typedef struct {
+    int   move;
+    float angle, target;
+    bool  active, record;
 } Anim;
 
-static void anim_start(Anim *a, int move)
+static void anim_start(Anim *a, int move, bool record)
 {
-    int   face = move / 3;
-    int   kind = move % 3;
-    float cw   = FACE_ROT[face].cw;
+    int   face    = move / 3;
+    int   kind    = move % 3;
+    float cw      = FACE_ROT[face].cw;
     float targets[3] = { cw, -cw, cw * 2.0f };
     a->move   = move;
     a->angle  = 0.0f;
     a->target = targets[kind];
     a->active = true;
+    a->record = record;
 }
 
-static void anim_update(Anim *a, Cube *cube)
+/* Advance animation by one frame; commits to cube+history on completion. */
+static void anim_update(Anim *a, Cube *cube, History *hist)
 {
     if (!a->active) return;
-    float dt  = GetFrameTime();
     float dir = (a->target >= 0.0f) ? +1.0f : -1.0f;
-    a->angle += dir * ANIM_SPEED * dt;
+    a->angle += dir * ANIM_SPEED * GetFrameTime();
     if (dir * a->angle >= dir * a->target) {
         cube_apply(cube, a->move);
+        if (a->record) hist_record(hist, a->move);
         a->active = false;
     }
 }
@@ -299,9 +308,10 @@ int main(void)
     InitWindow(SCREEN_W, SCREEN_H, "Magic Square – Rubik's Cube");
     SetTargetFPS(60);
 
-    Cube  cube;       cube_reset(&cube);
-    Queue queue  = {  0 };
-    Anim  anim   = { .active = false };
+    Cube    cube;    cube_reset(&cube);
+    Queue   queue  = { 0 };
+    History hist   = { 0 };
+    Anim    anim   = { .active = false };
 
     OrbitCam oc = { .radius = 7.0f, .azimuth = 0.6f, .elevation = 0.5f };
     Camera3D camera = {
@@ -310,7 +320,6 @@ int main(void)
     };
     orbit_update(&oc, &camera);
 
-    /* key → (cw move, ccw move) */
     static const struct { int key, cw, ccw; } BINDS[6] = {
         { KEY_U, M_U, M_Up }, { KEY_D, M_D, M_Dp },
         { KEY_L, M_L, M_Lp }, { KEY_R, M_R, M_Rp },
@@ -319,46 +328,79 @@ int main(void)
 
     while (!WindowShouldClose()) {
 
-        /* -- input -- */
+        /* ── input ──────────────────────────────────────────────── */
         bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        bool idle  = !anim.active && queue.count == 0;
+
+        /* face turns → queue (record=true, handled at dequeue) */
         for (int i = 0; i < 6; i++)
             if (IsKeyPressed(BINDS[i].key))
                 queue_push(&queue, shift ? BINDS[i].ccw : BINDS[i].cw);
 
+        /* undo: only when fully idle, cursor > 0 */
+        if (IsKeyPressed(KEY_Z) && idle && hist.pos > 0) {
+            hist.pos--;
+            anim_start(&anim, cube_inverse(hist.moves[hist.pos]), false);
+        }
+
+        /* redo: only when fully idle, cursor < len */
+        if (IsKeyPressed(KEY_Y) && idle && hist.pos < hist.len) {
+            anim_start(&anim, hist.moves[hist.pos], false);
+            hist.pos++;
+        }
+
+        /* scramble: instant, clears history */
         if (IsKeyPressed(KEY_SPACE)) {
-            /* Instant scramble: apply directly so no animation queue needed */
             srand((unsigned)(GetTime() * 1000.0));
             cube_scramble(&cube, 20);
             queue.head = queue.count = 0;
             anim.active = false;
+            hist_clear(&hist);
         }
+
+        /* reset: clears everything */
         if (IsKeyPressed(KEY_ENTER)) {
             cube_reset(&cube);
             queue.head = queue.count = 0;
             anim.active = false;
+            hist_clear(&hist);
         }
 
-        /* -- dequeue next move when idle -- */
+        /* ── dequeue → animation ────────────────────────────────── */
         if (!anim.active && queue.count > 0)
-            anim_start(&anim, queue_pop(&queue));
+            anim_start(&anim, queue_pop(&queue), true);
 
-        /* -- advance animation -- */
-        anim_update(&anim, &cube);
+        /* ── advance animation ──────────────────────────────────── */
+        anim_update(&anim, &cube, &hist);
 
-        /* -- camera -- */
+        /* ── camera ─────────────────────────────────────────────── */
         orbit_update(&oc, &camera);
 
-        /* -- render -- */
+        /* ── render ─────────────────────────────────────────────── */
         BeginDrawing();
             ClearBackground((Color){ 30, 30, 30, 255 });
+
             BeginMode3D(camera);
                 draw_cube_state(&cube,
                                 anim.active ? anim.move / 3 : -1,
                                 anim.active ? anim.angle    :  0.0f);
             EndMode3D();
+
             DrawFPS(10, 10);
-            DrawText("U/D/L/R/F/B (Shift=CCW)  SPACE: scramble  ENTER: reset  Drag: orbit  Scroll: zoom",
-                     10, SCREEN_H - 26, 16, GRAY);
+
+            /* move counter */
+            DrawText(TextFormat("Moves: %d", hist.pos), 10, 36, 18, LIGHTGRAY);
+
+            /* undo/redo availability hint */
+            if (hist.pos > 0)
+                DrawText(TextFormat("Z: undo (%d)", hist.pos), 10, 58, 16, GRAY);
+            if (hist.pos < hist.len)
+                DrawText(TextFormat("Y: redo (%d)", hist.len - hist.pos),
+                         150, 58, 16, GRAY);
+
+            DrawText("U/D/L/R/F/B (Shift=CCW)  Z: undo  Y: redo  "
+                     "SPACE: scramble  ENTER: reset  Drag: orbit  Scroll: zoom",
+                     10, SCREEN_H - 26, 14, GRAY);
         EndDrawing();
     }
 
