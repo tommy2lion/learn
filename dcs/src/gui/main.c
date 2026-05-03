@@ -55,10 +55,9 @@ int main(int argc, char **argv) {
     editor_init(&ed, &cs, file_path);
 
     Camera2D cam = {0};
-    cam.target   = (Vector2){WIN_W / 2.0f, WIN_H / 2.0f};
-    cam.offset   = (Vector2){WIN_W / 2.0f, WIN_H / 2.0f};
-    cam.zoom     = 1.0f;
-    cam.rotation = 0.0f;
+    /* Center the camera on the loaded circuit (or world origin if empty)
+       so the leftmost column isn't hidden behind the sidebar. */
+    editor_fit_camera(&cam, &cs, WIN_W, WIN_H);
 
     while (!WindowShouldClose()) {
         editor_update(&ed, &cs, &cam);

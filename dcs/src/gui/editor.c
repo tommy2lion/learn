@@ -64,6 +64,30 @@ Rectangle editor_canvas_rect(int screen_w, int screen_h) {
     };
 }
 
+void editor_fit_camera(Camera2D *cam, const CanvasState *cs,
+                       int screen_w, int screen_h) {
+    Rectangle r = editor_canvas_rect(screen_w, screen_h);
+    Vector2 canvas_center = { r.x + r.width * 0.5f, r.y + r.height * 0.5f };
+    cam->offset = canvas_center;
+    cam->zoom = 1.0f;
+    cam->rotation = 0.0f;
+
+    if (cs->node_count == 0) {
+        cam->target = (Vector2){ 0, 0 };
+        return;
+    }
+
+    float min_x = cs->nodes[0].pos.x, max_x = min_x;
+    float min_y = cs->nodes[0].pos.y, max_y = min_y;
+    for (int i = 1; i < cs->node_count; i++) {
+        if (cs->nodes[i].pos.x < min_x) min_x = cs->nodes[i].pos.x;
+        if (cs->nodes[i].pos.x > max_x) max_x = cs->nodes[i].pos.x;
+        if (cs->nodes[i].pos.y < min_y) min_y = cs->nodes[i].pos.y;
+        if (cs->nodes[i].pos.y > max_y) max_y = cs->nodes[i].pos.y;
+    }
+    cam->target = (Vector2){ (min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f };
+}
+
 /* ── status / helpers ─────────────────────────────────────────── */
 
 static void status(EditorState *e, const char *fmt, ...) {
@@ -526,6 +550,13 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
     if (IsKeyPressed(KEY_R) &&
         !IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
         run_simulation(e, cs);
+    }
+
+    /* F → fit the view to the current circuit */
+    if (IsKeyPressed(KEY_F) &&
+        !IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
+        editor_fit_camera(cam, cs, GetScreenWidth(), GetScreenHeight());
+        status(e, "View fit");
     }
 }
 

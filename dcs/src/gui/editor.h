@@ -69,9 +69,15 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam);
 void editor_draw  (const EditorState *e, const CanvasState *cs, Camera2D cam,
                    int screen_w, int screen_h);
 
-/* The world-coordinate region where the canvas is rendered (used by main.c
+/* The screen-space region where the canvas is rendered (used by main.c
    for scissor clipping). */
 Rectangle editor_canvas_rect(int screen_w, int screen_h);
+
+/* Center the camera on the bounding box of all nodes so the whole circuit
+   is visible inside the canvas region. Falls back to the world origin if
+   the canvas is empty. Does not change zoom. */
+void editor_fit_camera(Camera2D *cam, const CanvasState *cs,
+                       int screen_w, int screen_h);
 
 /* Build a Circuit from the CanvasState, serialize, write to file.
    Returns 0 on success, -1 on error (writes message to err_out). */
