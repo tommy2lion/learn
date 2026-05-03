@@ -368,17 +368,22 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
         e->drag_node = -1;
     }
 
-    /* Sidebar buttons */
+    /* Sidebar buttons — clicking the active button toggles the mode off */
     if (over_sidebar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         SidebarBtn btns[8];
         int n = sidebar_buttons(btns);
         for (int i = 0; i < n; i++) {
-            if (CheckCollisionPointRec(mouse_screen, btns[i].r)) {
+            if (!CheckCollisionPointRec(mouse_screen, btns[i].r)) continue;
+            if (e->mode == MODE_PLACING && e->place_kind == btns[i].kind) {
+                e->mode = MODE_IDLE;
+                e->place_kind = PLACE_NONE;
+                status(e, "Cancelled");
+            } else {
                 e->mode = MODE_PLACING;
                 e->place_kind = btns[i].kind;
-                status(e, "Click canvas to place %s (ESC to cancel)", btns[i].label);
-                return;
+                status(e, "Click canvas to place %s (right-click to cancel)", btns[i].label);
             }
+            return;
         }
     }
 
@@ -415,8 +420,19 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
 
     /* Mode-specific handling */
     if (e->mode == MODE_PLACING) {
+        /* Right-click anywhere cancels placement */
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+            e->mode = MODE_IDLE;
+            e->place_kind = PLACE_NONE;
+            status(e, "Cancelled");
+            return;
+        }
+        /* Left-click on canvas: place ONE node, then return to IDLE.
+           To place several, click the sidebar button again. */
         if (over_canvas && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             place_at(e, cs, mouse_world);
+            e->mode = MODE_IDLE;
+            e->place_kind = PLACE_NONE;
         }
         return;
     }
