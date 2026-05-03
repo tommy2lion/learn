@@ -66,11 +66,11 @@ int main(int argc, char **argv) {
         BeginDrawing();
         ClearBackground((Color){240, 240, 240, 255});
 
-        /* Clip canvas drawing to the area outside the sidebar/header/status bar */
+        /* Clip canvas drawing to the canvas region (excludes sidebar, header,
+           bottom panel, and status bar). */
         int sw = GetScreenWidth(), sh = GetScreenHeight();
-        BeginScissorMode(EDITOR_SIDEBAR_W, EDITOR_HEADER_H,
-                         sw - EDITOR_SIDEBAR_W,
-                         sh - EDITOR_HEADER_H - EDITOR_STATUS_H);
+        Rectangle cr = editor_canvas_rect(sw, sh);
+        BeginScissorMode((int)cr.x, (int)cr.y, (int)cr.width, (int)cr.height);
         BeginMode2D(cam);
         canvas_draw(&cs, cam);
         EndMode2D();
