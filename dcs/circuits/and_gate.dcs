@@ -1,0 +1,4 @@
+inputs: a, b
+outputs: y
+
+y = and(a, b)

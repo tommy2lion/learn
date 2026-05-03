@@ -1,0 +1,4 @@
+inputs: a
+outputs: y
+
+y = not(a)
