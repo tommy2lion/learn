@@ -10,6 +10,8 @@
 #define Y_CENTER 380.0f
 #define Y_STEP   120.0f
 #define IO_R     12.0f         /* radius of input/output circles */
+#define PIN_HIT_R 9.0f         /* hit-test radius around a pin */
+#define WIRE_HIT_R 5
 #define INIT_CAP 16
 
 /* ── lookup helpers ───────────────────────────────────────────── */
@@ -64,14 +66,54 @@ static int add_node(CanvasState *cs, NodeKind kind, Vector2 pos,
     return idx;
 }
 
-static void add_wire(CanvasState *cs, int src, int dst, int dst_pin) {
+int canvas_add_input(CanvasState *cs, const char *name, Vector2 pos) {
+    return add_node(cs, NODE_INPUT, pos, name, GATE_AND, 0);
+}
+
+int canvas_add_output(CanvasState *cs, const char *name, Vector2 pos) {
+    return add_node(cs, NODE_OUTPUT, pos, name, GATE_AND, 0);
+}
+
+int canvas_add_gate(CanvasState *cs, GateType gtype, const char *name, Vector2 pos) {
+    int input_count = (gtype == GATE_NOT) ? 1 : 2;
+    return add_node(cs, NODE_GATE, pos, name, gtype, input_count);
+}
+
+int canvas_add_wire(CanvasState *cs, int src, int dst, int dst_pin) {
     if (cs->wire_count >= cs->wire_cap) {
         int nc = cs->wire_cap ? cs->wire_cap * 2 : INIT_CAP;
         CanvasWire *nw = realloc(cs->wires, nc * sizeof(CanvasWire));
-        if (!nw) return;
+        if (!nw) return -1;
         cs->wires = nw; cs->wire_cap = nc;
     }
     cs->wires[cs->wire_count++] = (CanvasWire){src, dst, dst_pin};
+    return 0;
+}
+
+void canvas_remove_wire(CanvasState *cs, int wire_idx) {
+    if (wire_idx < 0 || wire_idx >= cs->wire_count) return;
+    for (int i = wire_idx; i < cs->wire_count - 1; i++)
+        cs->wires[i] = cs->wires[i + 1];
+    cs->wire_count--;
+}
+
+void canvas_remove_node(CanvasState *cs, int node_idx) {
+    if (node_idx < 0 || node_idx >= cs->node_count) return;
+
+    /* Drop wires touching this node; renumber the rest. */
+    int w = 0;
+    for (int i = 0; i < cs->wire_count; i++) {
+        if (cs->wires[i].src_node == node_idx || cs->wires[i].dst_node == node_idx)
+            continue;
+        if (cs->wires[i].src_node > node_idx) cs->wires[i].src_node--;
+        if (cs->wires[i].dst_node > node_idx) cs->wires[i].dst_node--;
+        cs->wires[w++] = cs->wires[i];
+    }
+    cs->wire_count = w;
+
+    for (int i = node_idx; i < cs->node_count - 1; i++)
+        cs->nodes[i] = cs->nodes[i + 1];
+    cs->node_count--;
 }
 
 static Vector2 layout_pos(int col, int row, int total) {
@@ -83,13 +125,13 @@ static Vector2 layout_pos(int col, int row, int total) {
 
 /* ── pin geometry (used by both layout and drawing) ──────────── */
 
-static Vector2 node_output_pin(const CanvasNode *n) {
+Vector2 canvas_node_output_pin(const CanvasNode *n) {
     if (n->kind == NODE_GATE)  return (Vector2){n->pos.x + GATE_W / 2, n->pos.y};
     if (n->kind == NODE_INPUT) return (Vector2){n->pos.x + IO_R,       n->pos.y};
     return n->pos;
 }
 
-static Vector2 node_input_pin(const CanvasNode *n, int pin_idx) {
+Vector2 canvas_node_input_pin(const CanvasNode *n, int pin_idx) {
     if (n->kind == NODE_GATE) {
         Vector2 p = {n->pos.x - GATE_W / 2, n->pos.y};
         if (n->input_count == 2)
@@ -100,15 +142,72 @@ static Vector2 node_input_pin(const CanvasNode *n, int pin_idx) {
     return n->pos;
 }
 
+/* ── hit-testing ──────────────────────────────────────────────── */
+
+int canvas_node_at(const CanvasState *cs, Vector2 pt) {
+    /* Iterate from the end so most-recently-added (drawn on top) wins. */
+    for (int i = cs->node_count - 1; i >= 0; i--) {
+        const CanvasNode *n = &cs->nodes[i];
+        if (n->kind == NODE_GATE) {
+            Rectangle r = {n->pos.x - GATE_W / 2, n->pos.y - GATE_H / 2, GATE_W, GATE_H};
+            if (CheckCollisionPointRec(pt, r)) return i;
+        } else {
+            if (CheckCollisionPointCircle(pt, n->pos, IO_R)) return i;
+        }
+    }
+    return -1;
+}
+
+int canvas_output_pin_at(const CanvasState *cs, Vector2 pt) {
+    for (int i = cs->node_count - 1; i >= 0; i--) {
+        const CanvasNode *n = &cs->nodes[i];
+        if (n->kind == NODE_OUTPUT) continue; /* OUTPUT nodes have no output pin */
+        Vector2 p = canvas_node_output_pin(n);
+        if (CheckCollisionPointCircle(pt, p, PIN_HIT_R)) return i;
+    }
+    return -1;
+}
+
+int canvas_input_pin_at(const CanvasState *cs, Vector2 pt, int *pin_out) {
+    for (int i = cs->node_count - 1; i >= 0; i--) {
+        const CanvasNode *n = &cs->nodes[i];
+        if (n->kind == NODE_INPUT) continue; /* INPUT nodes have no input pin */
+        if (n->kind == NODE_OUTPUT) {
+            if (CheckCollisionPointCircle(pt, canvas_node_input_pin(n, 0), PIN_HIT_R)) {
+                if (pin_out) *pin_out = 0;
+                return i;
+            }
+        } else { /* GATE */
+            for (int j = 0; j < n->input_count; j++) {
+                if (CheckCollisionPointCircle(pt, canvas_node_input_pin(n, j), PIN_HIT_R)) {
+                    if (pin_out) *pin_out = j;
+                    return i;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+int canvas_wire_at(const CanvasState *cs, Vector2 pt) {
+    for (int i = cs->wire_count - 1; i >= 0; i--) {
+        const CanvasWire *w = &cs->wires[i];
+        Vector2 p1 = canvas_node_output_pin(&cs->nodes[w->src_node]);
+        Vector2 p2 = canvas_node_input_pin (&cs->nodes[w->dst_node], w->dst_pin);
+        if (CheckCollisionPointLine(pt, p1, p2, WIRE_HIT_R)) return i;
+    }
+    return -1;
+}
+
 /* ── public: init / free ──────────────────────────────────────── */
 
 void canvas_init(CanvasState *cs, const Circuit *c) {
     cs->nodes = NULL; cs->node_count = 0; cs->node_cap = 0;
     cs->wires = NULL; cs->wire_count = 0; cs->wire_cap = 0;
-    if (c->wire_count == 0) return;
+    if (c->wire_count == 0 && c->input_count == 0 && c->output_count == 0) return;
 
     /* Step 1: depth of each wire (inputs = 0; gate outputs = max(input depths) + 1) */
-    int *depth = calloc(c->wire_count, sizeof(int));
+    int *depth = calloc(c->wire_count > 0 ? c->wire_count : 1, sizeof(int));
     for (int i = 0; i < c->gate_count; i++) {
         const GateInst *g = &c->gates[i];
         int max_d = 0;
@@ -164,14 +263,14 @@ void canvas_init(CanvasState *cs, const Circuit *c) {
         if (dst < 0) continue;
         for (int j = 0; j < g->in_count; j++) {
             int src = find_producer_node(cs, g->in_wires[j]);
-            if (src >= 0) add_wire(cs, src, dst, j);
+            if (src >= 0) canvas_add_wire(cs, src, dst, j);
         }
     }
     /* Step 8: wires from output producers to output sink nodes */
     for (int i = 0; i < c->output_count; i++) {
         int src = find_producer_node(cs, c->output_names[i]);
         int dst = find_output_node(cs, c->output_names[i]);
-        if (src >= 0 && dst >= 0) add_wire(cs, src, dst, 0);
+        if (src >= 0 && dst >= 0) canvas_add_wire(cs, src, dst, 0);
     }
 
     free(depth);
@@ -194,8 +293,8 @@ void canvas_draw(const CanvasState *cs, Camera2D cam) {
     /* Wires first (under nodes) */
     for (int i = 0; i < cs->wire_count; i++) {
         const CanvasWire *w = &cs->wires[i];
-        Vector2 p1 = node_output_pin(&cs->nodes[w->src_node]);
-        Vector2 p2 = node_input_pin(&cs->nodes[w->dst_node], w->dst_pin);
+        Vector2 p1 = canvas_node_output_pin(&cs->nodes[w->src_node]);
+        Vector2 p2 = canvas_node_input_pin (&cs->nodes[w->dst_node], w->dst_pin);
         DrawLineEx(p1, p2, 2.0f, DARKGRAY);
     }
 
@@ -235,10 +334,10 @@ void canvas_draw(const CanvasState *cs, Camera2D cam) {
 
                 /* Pins */
                 for (int j = 0; j < n->input_count; j++) {
-                    Vector2 p = node_input_pin(n, j);
+                    Vector2 p = canvas_node_input_pin(n, j);
                     DrawCircleV(p, 4, BLACK);
                 }
-                DrawCircleV(node_output_pin(n), 4, BLACK);
+                DrawCircleV(canvas_node_output_pin(n), 4, BLACK);
 
                 /* Out-wire label above the box (small grey text) */
                 int lw = MeasureText(n->wire_name, 12);

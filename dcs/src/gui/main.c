@@ -2,11 +2,13 @@
 #include "sim.h"
 #include "parser.h"
 #include "canvas.h"
+#include "editor.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define WIN_W 1024
-#define WIN_H 768
+#define WIN_W 1280
+#define WIN_H 800
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -24,25 +26,33 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: dcs_gui <file.dcs>\n");
-        return 1;
+    const char *file_path = (argc >= 2) ? argv[1] : "untitled.dcs";
+
+    /* Try to load the file; if missing, start with an empty canvas. */
+    CanvasState cs = {0};
+    if (argc >= 2) {
+        char *text = read_file(argv[1]);
+        if (text) {
+            char err[256] = {0};
+            Circuit *c = parse_circuit(text, err, sizeof(err));
+            free(text);
+            if (c) {
+                canvas_init(&cs, c);
+                circuit_free(c);
+            } else {
+                fprintf(stderr, "parse error in %s: %s\n", argv[1], err);
+                return 1;
+            }
+        }
+        /* file doesn't exist → empty canvas, will create it on save */
     }
 
-    char *text = read_file(argv[1]);
-    if (!text) { fprintf(stderr, "cannot read %s\n", argv[1]); return 1; }
-
-    char err[256] = {0};
-    Circuit *c = parse_circuit(text, err, sizeof(err));
-    free(text);
-    if (!c) { fprintf(stderr, "parse error: %s\n", err); return 1; }
-
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(WIN_W, WIN_H, "DCS Viewer");
+    InitWindow(WIN_W, WIN_H, "DCS Editor");
     SetTargetFPS(60);
 
-    CanvasState cs;
-    canvas_init(&cs, c);
+    EditorState ed;
+    editor_init(&ed, &cs, file_path);
 
     Camera2D cam = {0};
     cam.target   = (Vector2){WIN_W / 2.0f, WIN_H / 2.0f};
@@ -51,43 +61,27 @@ int main(int argc, char **argv) {
     cam.rotation = 0.0f;
 
     while (!WindowShouldClose()) {
-        /* Pan: right or middle mouse drag */
-        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
-            IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
-            Vector2 d = GetMouseDelta();
-            cam.target.x -= d.x / cam.zoom;
-            cam.target.y -= d.y / cam.zoom;
-        }
-
-        /* Zoom toward mouse cursor with scroll wheel */
-        float wheel = GetMouseWheelMove();
-        if (wheel != 0.0f) {
-            Vector2 mw = GetScreenToWorld2D(GetMousePosition(), cam);
-            cam.offset = GetMousePosition();
-            cam.target = mw;
-            cam.zoom += wheel * 0.1f * cam.zoom;
-            if (cam.zoom < 0.1f) cam.zoom = 0.1f;
-            if (cam.zoom > 5.0f) cam.zoom = 5.0f;
-        }
+        editor_update(&ed, &cs, &cam);
 
         BeginDrawing();
         ClearBackground((Color){240, 240, 240, 255});
 
+        /* Clip canvas drawing to the area outside the sidebar/header/status bar */
+        int sw = GetScreenWidth(), sh = GetScreenHeight();
+        BeginScissorMode(EDITOR_SIDEBAR_W, EDITOR_HEADER_H,
+                         sw - EDITOR_SIDEBAR_W,
+                         sh - EDITOR_HEADER_H - EDITOR_STATUS_H);
         BeginMode2D(cam);
         canvas_draw(&cs, cam);
         EndMode2D();
+        EndScissorMode();
 
-        /* Header bar (screen space, drawn on top) */
-        DrawRectangle(0, 0, GetScreenWidth(), 30, (Color){200, 200, 200, 255});
-        DrawText(TextFormat("File: %s", argv[1]), 10, 8, 16, BLACK);
-        DrawText("R/M-drag: pan  |  Scroll: zoom  |  ESC: quit",
-                 GetScreenWidth() - 380, 10, 14, DARKGRAY);
+        editor_draw(&ed, &cs, cam, sw, sh);
 
         EndDrawing();
     }
 
     canvas_free(&cs);
-    circuit_free(c);
     CloseWindow();
     return 0;
 }

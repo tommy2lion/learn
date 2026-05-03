@@ -33,6 +33,8 @@ typedef struct {
     int         wire_count, wire_cap;
 } CanvasState;
 
+/* ── Build / teardown ─────────────────────────────────────────── */
+
 /* Build CanvasState from Circuit: auto-layout nodes by topological depth,
    wire up gate inputs and circuit outputs to their producers. */
 void canvas_init(CanvasState *cs, const Circuit *c);
@@ -40,5 +42,26 @@ void canvas_free(CanvasState *cs);
 
 /* Render nodes and wires. Must be called inside BeginMode2D(cam). */
 void canvas_draw(const CanvasState *cs, Camera2D cam);
+
+/* ── Mutators (used by the editor) ────────────────────────────── */
+
+int  canvas_add_input (CanvasState *cs, const char *name, Vector2 pos);
+int  canvas_add_output(CanvasState *cs, const char *name, Vector2 pos);
+int  canvas_add_gate  (CanvasState *cs, GateType gtype, const char *out_wire, Vector2 pos);
+int  canvas_add_wire  (CanvasState *cs, int src, int dst, int dst_pin);
+void canvas_remove_node(CanvasState *cs, int node_idx);
+void canvas_remove_wire(CanvasState *cs, int wire_idx);
+
+/* ── Geometry ─────────────────────────────────────────────────── */
+
+Vector2 canvas_node_output_pin(const CanvasNode *n);
+Vector2 canvas_node_input_pin (const CanvasNode *n, int pin_idx);
+
+/* ── Hit-testing (returns -1 if nothing matches) ──────────────── */
+
+int canvas_node_at      (const CanvasState *cs, Vector2 pt);
+int canvas_output_pin_at(const CanvasState *cs, Vector2 pt);
+int canvas_input_pin_at (const CanvasState *cs, Vector2 pt, int *pin_out);
+int canvas_wire_at      (const CanvasState *cs, Vector2 pt);
 
 #endif /* DCS_CANVAS_H */

@@ -11,7 +11,7 @@ PARSER_SRC  = src/parser/parser.c
 PARSER_INC  = src/parser
 CLI_SRC     = cli/main.c
 CLI_EXE     = dcs_cli.exe
-GUI_SRC     = src/gui/main.c src/gui/canvas.c
+GUI_SRC     = src/gui/main.c src/gui/canvas.c src/gui/editor.c
 GUI_INC     = src/gui
 GUI_EXE     = dcs_gui.exe
 
@@ -50,7 +50,8 @@ test_cli: $(CLI_EXE) $(TEST_CLI_SH)
 	sh $(TEST_CLI_SH)
 
 # ── Step 1.4: GUI viewer (raylib) ──────────────────────────────────────────
-$(GUI_EXE): $(SIM_SRC) $(PARSER_SRC) $(GUI_SRC) src/sim/sim.h src/parser/parser.h src/gui/canvas.h
+$(GUI_EXE): $(SIM_SRC) $(PARSER_SRC) $(GUI_SRC) \
+            src/sim/sim.h src/parser/parser.h src/gui/canvas.h src/gui/editor.h
 	$(CC) $(CFLAGS) -I $(SIM_INC) -I $(PARSER_INC) -I $(GUI_INC) -I $(RAYLIB_INC) \
 		$(SIM_SRC) $(PARSER_SRC) $(GUI_SRC) -o $@ $(RAYLIB_LDFL)
 
