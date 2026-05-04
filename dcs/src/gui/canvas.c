@@ -61,9 +61,40 @@ static int add_node(CanvasState *cs, NodeKind kind, Vector2 pos,
     n->pos = pos;
     n->gate_type = gtype;
     n->input_count = input_count;
+    n->selected = 0;
     strncpy(n->wire_name, name, SIM_NAME_LEN - 1);
     n->wire_name[SIM_NAME_LEN - 1] = '\0';
     return idx;
+}
+
+/* ── selection helpers ───────────────────────────────────────── */
+
+void canvas_clear_selection(CanvasState *cs) {
+    for (int i = 0; i < cs->node_count; i++) cs->nodes[i].selected = 0;
+}
+
+void canvas_select_all(CanvasState *cs) {
+    for (int i = 0; i < cs->node_count; i++) cs->nodes[i].selected = 1;
+}
+
+void canvas_select_in_rect(CanvasState *cs, Rectangle rect, int additive) {
+    if (!additive) canvas_clear_selection(cs);
+    for (int i = 0; i < cs->node_count; i++) {
+        if (CheckCollisionPointRec(cs->nodes[i].pos, rect))
+            cs->nodes[i].selected = 1;
+    }
+}
+
+int canvas_selection_count(const CanvasState *cs) {
+    int n = 0;
+    for (int i = 0; i < cs->node_count; i++) if (cs->nodes[i].selected) n++;
+    return n;
+}
+
+void canvas_remove_selected(CanvasState *cs) {
+    /* Remove from end to avoid index shifting issues. */
+    for (int i = cs->node_count - 1; i >= 0; i--)
+        if (cs->nodes[i].selected) canvas_remove_node(cs, i);
 }
 
 int canvas_add_input(CanvasState *cs, const char *name, Vector2 pos) {
@@ -345,6 +376,21 @@ void canvas_draw(const CanvasState *cs, Camera2D cam) {
                          n->pos.y - GATE_H / 2 - 16, 12, GRAY);
                 break;
             }
+        }
+    }
+
+    /* Selection highlights — drawn last so they sit on top of everything. */
+    Color hi = (Color){255, 140, 0, 255}; /* orange */
+    for (int i = 0; i < cs->node_count; i++) {
+        const CanvasNode *n = &cs->nodes[i];
+        if (!n->selected) continue;
+        if (n->kind == NODE_GATE) {
+            Rectangle r = {n->pos.x - GATE_W / 2 - 4, n->pos.y - GATE_H / 2 - 4,
+                           GATE_W + 8, GATE_H + 8};
+            DrawRectangleLinesEx(r, 3, hi);
+        } else {
+            DrawCircleLines(n->pos.x, n->pos.y, IO_R + 4, hi);
+            DrawCircleLines(n->pos.x, n->pos.y, IO_R + 5, hi);
         }
     }
 }

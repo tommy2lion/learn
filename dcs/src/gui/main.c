@@ -72,6 +72,7 @@ int main(int argc, char **argv) {
         BeginScissorMode((int)cr.x, (int)cr.y, (int)cr.width, (int)cr.height);
         BeginMode2D(cam);
         canvas_draw(&cs, cam);
+        editor_draw_world_overlay(&ed, cam);
         EndMode2D();
         EndScissorMode();
 

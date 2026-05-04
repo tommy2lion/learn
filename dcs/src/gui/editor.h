@@ -21,6 +21,7 @@ typedef enum {
     MODE_PLACING,
     MODE_WIRING,
     MODE_DRAGGING,
+    MODE_MARQUEE,    /* drawing a rectangular selection */
 } EditMode;
 
 typedef enum {
@@ -42,6 +43,8 @@ typedef struct {
 
     int     drag_node;
     Vector2 drag_offset;
+
+    Vector2 marquee_start;       /* world coord (MODE_MARQUEE only) */
 
     int hover_node;
     int hover_wire;
@@ -68,6 +71,9 @@ void editor_init  (EditorState *e, const CanvasState *cs, const char *file_path)
 void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam);
 void editor_draw  (const EditorState *e, const CanvasState *cs, Camera2D cam,
                    int screen_w, int screen_h);
+
+/* Draw world-space overlays (marquee rectangle). Call inside BeginMode2D(). */
+void editor_draw_world_overlay(const EditorState *e, Camera2D cam);
 
 /* The screen-space region where the canvas is rendered (used by main.c
    for scissor clipping). */

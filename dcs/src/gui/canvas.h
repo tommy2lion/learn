@@ -18,6 +18,7 @@ typedef struct {
                                        GATE:         out_wire (used to find producer) */
     GateType gate_type;             /* valid only for NODE_GATE */
     int      input_count;           /* 0 for I/O, 1 for NOT, 2 for AND/OR */
+    int      selected;              /* editor selection state (0 or 1) */
 } CanvasNode;
 
 typedef struct {
@@ -51,6 +52,14 @@ int  canvas_add_gate  (CanvasState *cs, GateType gtype, const char *out_wire, Ve
 int  canvas_add_wire  (CanvasState *cs, int src, int dst, int dst_pin);
 void canvas_remove_node(CanvasState *cs, int node_idx);
 void canvas_remove_wire(CanvasState *cs, int wire_idx);
+
+/* ── Selection ────────────────────────────────────────────────── */
+
+void canvas_clear_selection(CanvasState *cs);
+void canvas_select_all     (CanvasState *cs);
+void canvas_select_in_rect (CanvasState *cs, Rectangle world_rect, int additive);
+int  canvas_selection_count(const CanvasState *cs);
+void canvas_remove_selected(CanvasState *cs);
 
 /* ── Geometry ─────────────────────────────────────────────────── */
 

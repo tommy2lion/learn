@@ -384,12 +384,29 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
     int over_sidebar      = over_left && !over_top && !over_panel && !over_status;
     int over_inputs_panel = over_left && over_panel;
 
-    /* ESC always cancels current mode */
+    /* ESC always cancels current mode and clears selection */
     if (IsKeyPressed(KEY_ESCAPE)) {
         e->mode = MODE_IDLE;
         e->place_kind = PLACE_NONE;
         e->wire_src_node = -1;
         e->drag_node = -1;
+        canvas_clear_selection(cs);
+    }
+
+    /* Ctrl+A → select all */
+    if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) &&
+        IsKeyPressed(KEY_A)) {
+        canvas_select_all(cs);
+        int n = canvas_selection_count(cs);
+        status(e, "Selected %d node%s", n, n == 1 ? "" : "s");
+    }
+
+    /* Delete → remove all selected */
+    if (IsKeyPressed(KEY_DELETE) && canvas_selection_count(cs) > 0) {
+        int n = canvas_selection_count(cs);
+        canvas_remove_selected(cs);
+        status(e, "Deleted %d node%s", n, n == 1 ? "" : "s");
+        if (e->mode == MODE_DRAGGING) { e->mode = MODE_IDLE; e->drag_node = -1; }
     }
 
     /* Sidebar buttons — clicking the active button toggles the mode off */
@@ -487,8 +504,43 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
             e->mode = MODE_IDLE; e->drag_node = -1;
         } else if (e->drag_node >= 0 && e->drag_node < cs->node_count) {
-            cs->nodes[e->drag_node].pos.x = mouse_world.x - e->drag_offset.x;
-            cs->nodes[e->drag_node].pos.y = mouse_world.y - e->drag_offset.y;
+            /* Compute the new position the dragged node should have so its
+               grab point stays under the cursor. */
+            Vector2 new_pos = {mouse_world.x - e->drag_offset.x,
+                               mouse_world.y - e->drag_offset.y};
+            Vector2 d = {new_pos.x - cs->nodes[e->drag_node].pos.x,
+                         new_pos.y - cs->nodes[e->drag_node].pos.y};
+            if (cs->nodes[e->drag_node].selected) {
+                /* Move the whole selection by the same delta. */
+                for (int i = 0; i < cs->node_count; i++) {
+                    if (cs->nodes[i].selected) {
+                        cs->nodes[i].pos.x += d.x;
+                        cs->nodes[i].pos.y += d.y;
+                    }
+                }
+            } else {
+                cs->nodes[e->drag_node].pos = new_pos;
+            }
+        }
+        return;
+    }
+
+    if (e->mode == MODE_MARQUEE) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+            e->mode = MODE_IDLE; /* cancel marquee */
+            return;
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            float x0 = (e->marquee_start.x < mouse_world.x) ? e->marquee_start.x : mouse_world.x;
+            float y0 = (e->marquee_start.y < mouse_world.y) ? e->marquee_start.y : mouse_world.y;
+            float x1 = (e->marquee_start.x > mouse_world.x) ? e->marquee_start.x : mouse_world.x;
+            float y1 = (e->marquee_start.y > mouse_world.y) ? e->marquee_start.y : mouse_world.y;
+            Rectangle r = { x0, y0, x1 - x0, y1 - y0 };
+            int additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            canvas_select_in_rect(cs, r, additive);
+            int n = canvas_selection_count(cs);
+            if (n > 0) status(e, "Selected %d node%s", n, n == 1 ? "" : "s");
+            e->mode = MODE_IDLE;
         }
         return;
     }
@@ -497,8 +549,16 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
     if (over_canvas) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
             if (e->hover_node >= 0) {
-                canvas_remove_node(cs, e->hover_node);
-                status(e, "Node deleted");
+                /* If the hovered node is part of the selection, delete the
+                   whole selection; otherwise just delete this one node. */
+                if (cs->nodes[e->hover_node].selected) {
+                    int n = canvas_selection_count(cs);
+                    canvas_remove_selected(cs);
+                    status(e, "Deleted %d node%s", n, n == 1 ? "" : "s");
+                } else {
+                    canvas_remove_node(cs, e->hover_node);
+                    status(e, "Node deleted");
+                }
                 e->hover_node = -1;
             } else if (e->hover_wire >= 0) {
                 canvas_remove_wire(cs, e->hover_wire);
@@ -527,12 +587,25 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
                 return;
             }
             if (e->hover_node >= 0) {
+                /* Click on a node: if it's NOT part of the current selection,
+                   replace the selection with just this node. Then start drag. */
+                if (!cs->nodes[e->hover_node].selected) {
+                    canvas_clear_selection(cs);
+                    cs->nodes[e->hover_node].selected = 1;
+                }
                 e->mode = MODE_DRAGGING;
                 e->drag_node = e->hover_node;
                 e->drag_offset.x = mouse_world.x - cs->nodes[e->hover_node].pos.x;
                 e->drag_offset.y = mouse_world.y - cs->nodes[e->hover_node].pos.y;
                 return;
             }
+            /* Click on empty canvas → start marquee selection.
+               Without Shift, the existing selection is cleared first. */
+            if (!IsKeyDown(KEY_LEFT_SHIFT) && !IsKeyDown(KEY_RIGHT_SHIFT))
+                canvas_clear_selection(cs);
+            e->mode = MODE_MARQUEE;
+            e->marquee_start = mouse_world;
+            return;
         }
     }
 
@@ -561,6 +634,18 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
 }
 
 /* ── drawing ──────────────────────────────────────────────────── */
+
+void editor_draw_world_overlay(const EditorState *e, Camera2D cam) {
+    if (e->mode != MODE_MARQUEE) return;
+    Vector2 m_now = GetScreenToWorld2D(GetMousePosition(), cam);
+    float x0 = (e->marquee_start.x < m_now.x) ? e->marquee_start.x : m_now.x;
+    float y0 = (e->marquee_start.y < m_now.y) ? e->marquee_start.y : m_now.y;
+    float x1 = (e->marquee_start.x > m_now.x) ? e->marquee_start.x : m_now.x;
+    float y1 = (e->marquee_start.y > m_now.y) ? e->marquee_start.y : m_now.y;
+    Rectangle r = { x0, y0, x1 - x0, y1 - y0 };
+    DrawRectangleRec(r,        (Color){80, 130, 180,  50});
+    DrawRectangleLinesEx(r, 1.5f, (Color){80, 130, 180, 220});
+}
 
 static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int sw, int sh) {
     (void)sw;
