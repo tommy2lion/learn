@@ -8,7 +8,9 @@
 #define EDITOR_SIDEBAR_W      110
 #define EDITOR_HEADER_H        30
 #define EDITOR_STATUS_H        24
-#define EDITOR_PANEL_H        240
+#define EDITOR_PANEL_H_DEFAULT 240
+#define EDITOR_PANEL_H_MIN      80   /* keeps RUN/SWEEP buttons + Steps row visible */
+#define EDITOR_CANVAS_H_MIN    100   /* leaves at least this much for the canvas */
 #define EDITOR_FILE_PATH_LEN  256
 #define EDITOR_STATUS_LEN     128
 
@@ -21,7 +23,8 @@ typedef enum {
     MODE_PLACING,
     MODE_WIRING,
     MODE_DRAGGING,
-    MODE_MARQUEE,    /* drawing a rectangular selection */
+    MODE_MARQUEE,         /* drawing a rectangular selection */
+    MODE_RESIZING_PANEL,  /* dragging the divider between canvas and bottom panel */
 } EditMode;
 
 typedef enum {
@@ -56,6 +59,7 @@ typedef struct {
     char   file_path[EDITOR_FILE_PATH_LEN];
     int    path_is_explicit;     /* 1 if user picked the path, 0 for the default */
     int    file_menu_open;       /* File dropdown is showing */
+    int    panel_h;              /* current height of the bottom panel (resizable) */
     char   status[EDITOR_STATUS_LEN];
     double status_until;
 
@@ -78,8 +82,9 @@ void editor_draw  (const EditorState *e, const CanvasState *cs, Camera2D cam,
 void editor_draw_world_overlay(const EditorState *e, Camera2D cam);
 
 /* The screen-space region where the canvas is rendered (used by main.c
-   for scissor clipping). */
-Rectangle editor_canvas_rect(int screen_w, int screen_h);
+   for scissor clipping). The bottom-panel height is resizable, so the
+   caller passes the current value (typically `ed.panel_h`). */
+Rectangle editor_canvas_rect(int screen_w, int screen_h, int panel_h);
 
 /* Center the camera on the bounding box of all nodes so the whole circuit
    is visible inside the canvas region. Falls back to the world origin if

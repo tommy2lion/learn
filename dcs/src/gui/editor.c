@@ -33,8 +33,10 @@ static int sidebar_buttons(SidebarBtn *out) {
 #define IPANEL_TOGGLE_GAP 4
 #define IPANEL_MAX_VISIBLE_TOGGLES 5
 
-static int panel_top(int screen_h)    { return screen_h - EDITOR_STATUS_H - EDITOR_PANEL_H; }
-static int panel_bottom(int screen_h) { return screen_h - EDITOR_STATUS_H; }
+/* The bottom panel's top edge depends on the runtime panel_h.
+   The bottom edge is fixed (just above the status bar). */
+static int panel_top   (int screen_h, int panel_h) { return screen_h - EDITOR_STATUS_H - panel_h; }
+static int panel_bottom(int screen_h)              { return screen_h - EDITOR_STATUS_H; }
 
 static Rectangle ipanel_steps_minus(int screen_h) {
     int by = panel_bottom(screen_h);
@@ -55,8 +57,8 @@ static Rectangle ipanel_sweep_btn(int screen_h) {
     int by = panel_bottom(screen_h);
     return (Rectangle){ 8 + 43 + 8, by - 44, 43, 36 };
 }
-static Rectangle ipanel_toggle(int idx, int screen_h) {
-    int py = panel_top(screen_h);
+static Rectangle ipanel_toggle(int idx, int screen_h, int panel_h) {
+    int py = panel_top(screen_h, panel_h);
     return (Rectangle){ 8, py + 22 + idx * (IPANEL_TOGGLE_H + IPANEL_TOGGLE_GAP),
                         EDITOR_SIDEBAR_W - 16, IPANEL_TOGGLE_H };
 }
@@ -84,18 +86,20 @@ static Rectangle filemenu_item_rect(int i) {
 
 /* ── canvas region (for main.c scissor) ───────────────────────── */
 
-Rectangle editor_canvas_rect(int screen_w, int screen_h) {
+Rectangle editor_canvas_rect(int screen_w, int screen_h, int panel_h) {
     return (Rectangle){
         EDITOR_SIDEBAR_W,
         EDITOR_HEADER_H,
         screen_w  - EDITOR_SIDEBAR_W,
-        screen_h  - EDITOR_HEADER_H - EDITOR_STATUS_H - EDITOR_PANEL_H
+        screen_h  - EDITOR_HEADER_H - EDITOR_STATUS_H - panel_h
     };
 }
 
 void editor_fit_camera(Camera2D *cam, const CanvasState *cs,
                        int screen_w, int screen_h) {
-    Rectangle r = editor_canvas_rect(screen_w, screen_h);
+    /* fit_camera doesn't have access to EditorState; use the default panel
+       height. (Called once at startup before any user resizing.) */
+    Rectangle r = editor_canvas_rect(screen_w, screen_h, EDITOR_PANEL_H_DEFAULT);
     Vector2 canvas_center = { r.x + r.width * 0.5f, r.y + r.height * 0.5f };
     cam->offset = canvas_center;
     cam->zoom = 1.0f;
@@ -258,6 +262,7 @@ void editor_init(EditorState *e, const CanvasState *cs, const char *file_path) {
     e->hover_node = -1;
     e->hover_wire = -1;
     e->steps = 8;
+    e->panel_h = EDITOR_PANEL_H_DEFAULT;
     for (int i = 0; i < cs->node_count; i++) {
         if (cs->nodes[i].kind == NODE_INPUT)  e->counter_in++;
         if (cs->nodes[i].kind == NODE_OUTPUT) e->counter_out++;
@@ -501,7 +506,7 @@ static int handle_input_panel_click(EditorState *e, CanvasState *cs, Vector2 mou
     int idx = 0;
     for (int i = 0; i < cs->node_count && idx < IPANEL_MAX_VISIBLE_TOGGLES; i++) {
         if (cs->nodes[i].kind != NODE_INPUT) continue;
-        if (CheckCollisionPointRec(mouse, ipanel_toggle(idx, sh))) {
+        if (CheckCollisionPointRec(mouse, ipanel_toggle(idx, sh, e->panel_h))) {
             toggle_flip(e, cs->nodes[i].wire_name);
             return 1;
         }
@@ -515,9 +520,41 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
     Vector2 mouse_world  = GetScreenToWorld2D(mouse_screen, *cam);
     int sh = GetScreenHeight();
 
+    /* Clamp panel_h on each frame so window resizes don't leave it out of range. */
+    int panel_max = sh - EDITOR_HEADER_H - EDITOR_STATUS_H - EDITOR_CANVAS_H_MIN;
+    if (panel_max < EDITOR_PANEL_H_MIN) panel_max = EDITOR_PANEL_H_MIN;
+    if (e->panel_h < EDITOR_PANEL_H_MIN) e->panel_h = EDITOR_PANEL_H_MIN;
+    if (e->panel_h > panel_max)          e->panel_h = panel_max;
+
+    int divider_y    = panel_top(sh, e->panel_h);
+    int over_divider = (mouse_screen.y >= divider_y - 5 && mouse_screen.y <= divider_y);
+
+    /* Show the resize cursor while hovering near the divider or actively dragging it. */
+    SetMouseCursor((over_divider || e->mode == MODE_RESIZING_PANEL)
+                   ? MOUSE_CURSOR_RESIZE_NS : MOUSE_CURSOR_DEFAULT);
+
+    /* While resizing, capture the drag exclusively. */
+    if (e->mode == MODE_RESIZING_PANEL) {
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            e->mode = MODE_IDLE;
+        } else {
+            int new_h = sh - EDITOR_STATUS_H - (int)mouse_screen.y;
+            if (new_h < EDITOR_PANEL_H_MIN) new_h = EDITOR_PANEL_H_MIN;
+            if (new_h > panel_max)          new_h = panel_max;
+            e->panel_h = new_h;
+        }
+        return;
+    }
+
+    /* Start resizing on left-click near the divider (takes priority over canvas). */
+    if (over_divider && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        e->mode = MODE_RESIZING_PANEL;
+        return;
+    }
+
     int over_left  = mouse_screen.x < EDITOR_SIDEBAR_W;
     int over_top   = mouse_screen.y < EDITOR_HEADER_H;
-    int over_panel = mouse_screen.y >= panel_top(sh) && mouse_screen.y < panel_bottom(sh);
+    int over_panel = mouse_screen.y >= panel_top(sh, e->panel_h) && mouse_screen.y < panel_bottom(sh);
     int over_status= mouse_screen.y >= panel_bottom(sh);
     int over_canvas = !over_left && !over_top && !over_panel && !over_status;
 
@@ -822,10 +859,10 @@ void editor_draw_world_overlay(const EditorState *e, Camera2D cam) {
 
 static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int sw, int sh) {
     (void)sw;
-    int py = panel_top(sh);
+    int py = panel_top(sh, e->panel_h);
 
     /* panel background */
-    DrawRectangle(0, py, EDITOR_SIDEBAR_W, EDITOR_PANEL_H, (Color){36, 36, 44, 255});
+    DrawRectangle(0, py, EDITOR_SIDEBAR_W, e->panel_h, (Color){36, 36, 44, 255});
     DrawText("INPUTS", 8, py + 4, 13, (Color){200, 200, 200, 255});
 
     Vector2 mp = GetMousePosition();
@@ -837,7 +874,7 @@ static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int s
 
     for (int i = 0; i < cs->node_count && idx < IPANEL_MAX_VISIBLE_TOGGLES; i++) {
         if (cs->nodes[i].kind != NODE_INPUT) continue;
-        Rectangle r = ipanel_toggle(idx, sh);
+        Rectangle r = ipanel_toggle(idx, sh, e->panel_h);
         Signal v = toggle_get(e, cs->nodes[i].wire_name);
         Color bg = (v == SIG_HIGH) ? (Color){70, 150, 90, 255}
                                    : (Color){150, 70, 70, 255};
@@ -852,7 +889,7 @@ static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int s
         idx++;
     }
     if (total_inputs > IPANEL_MAX_VISIBLE_TOGGLES) {
-        Rectangle r = ipanel_toggle(IPANEL_MAX_VISIBLE_TOGGLES, sh);
+        Rectangle r = ipanel_toggle(IPANEL_MAX_VISIBLE_TOGGLES, sh, e->panel_h);
         DrawText(TextFormat("+%d more", total_inputs - IPANEL_MAX_VISIBLE_TOGGLES),
                  (int)r.x + 6, (int)r.y + 5, 12, GRAY);
     }
@@ -903,7 +940,7 @@ static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int s
 void editor_draw(const EditorState *e, const CanvasState *cs, Camera2D cam,
                  int screen_w, int screen_h) {
     Vector2 mp = GetMousePosition();
-    int py = panel_top(screen_h);
+    int py = panel_top(screen_h, e->panel_h);
 
     /* Sidebar background (top portion only — stops above the inputs panel) */
     DrawRectangle(0, 0, EDITOR_SIDEBAR_W, py, (Color){50, 50, 60, 255});
@@ -937,10 +974,20 @@ void editor_draw(const EditorState *e, const CanvasState *cs, Camera2D cam,
     draw_inputs_panel(e, cs, screen_w, screen_h);
     Rectangle wave_bounds = {
         EDITOR_SIDEBAR_W, py,
-        screen_w - EDITOR_SIDEBAR_W, EDITOR_PANEL_H
+        screen_w - EDITOR_SIDEBAR_W, e->panel_h
     };
     DrawRectangleRec(wave_bounds, (Color){250, 250, 252, 255});
     waveform_draw(e->tracks, e->track_count, wave_bounds);
+
+    /* Divider line between canvas and bottom panel — clickable to resize. */
+    int divider_y = py;
+    int over_div = (mp.y >= divider_y - 5 && mp.y <= divider_y);
+    int active_div = (e->mode == MODE_RESIZING_PANEL);
+    DrawLine(0, divider_y - 1, screen_w, divider_y - 1, (Color){170, 170, 170, 255});
+    DrawLine(0, divider_y,     screen_w, divider_y,     (Color){90, 90, 90, 255});
+    if (over_div || active_div) {
+        DrawRectangle(0, divider_y - 2, screen_w, 4, (Color){80, 130, 180, 200});
+    }
 
     /* Header */
     DrawRectangle(EDITOR_SIDEBAR_W, 0, screen_w - EDITOR_SIDEBAR_W,

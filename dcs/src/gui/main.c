@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
         /* Clip canvas drawing to the canvas region (excludes sidebar, header,
            bottom panel, and status bar). */
         int sw = GetScreenWidth(), sh = GetScreenHeight();
-        Rectangle cr = editor_canvas_rect(sw, sh);
+        Rectangle cr = editor_canvas_rect(sw, sh, ed.panel_h);
         BeginScissorMode((int)cr.x, (int)cr.y, (int)cr.width, (int)cr.height);
         BeginMode2D(cam);
         canvas_draw(&cs, cam);
