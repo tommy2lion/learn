@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
 
     /* Try to load the file; if missing, start with an empty canvas. */
     CanvasState cs = {0};
+    int loaded_ok = 0;
     if (argc >= 2) {
         char *text = read_file(argv[1]);
         if (text) {
@@ -39,6 +40,7 @@ int main(int argc, char **argv) {
             if (c) {
                 canvas_init(&cs, c);
                 circuit_free(c);
+                loaded_ok = 1;
             } else {
                 fprintf(stderr, "parse error in %s: %s\n", argv[1], err);
                 return 1;
@@ -53,6 +55,9 @@ int main(int argc, char **argv) {
 
     EditorState ed;
     editor_init(&ed, &cs, file_path);
+    /* If we successfully loaded a file from argv, treat its path as explicit
+       (Ctrl+S will save back to it). Otherwise the first save prompts. */
+    ed.path_is_explicit = loaded_ok;
 
     Camera2D cam = {0};
     /* Center the camera on the loaded circuit (or world origin if empty)

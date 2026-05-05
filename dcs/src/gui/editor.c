@@ -1,6 +1,7 @@
 #include "editor.h"
 #include "parser.h"
 #include "sim.h"
+#include "dialog.h"
 #include "raylib.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,14 +44,42 @@ static Rectangle ipanel_steps_plus(int screen_h) {
     int by = panel_bottom(screen_h);
     return (Rectangle){ EDITOR_SIDEBAR_W - 30, by - 78, 22, 22 };
 }
+/* RUN and SWEEP share the bottom row, side-by-side.
+   Panel content area is x=8..(SIDEBAR_W-8), so 94px wide; with an 8px gap
+   between, each button is 43px. */
 static Rectangle ipanel_run_btn(int screen_h) {
     int by = panel_bottom(screen_h);
-    return (Rectangle){ 8, by - 44, EDITOR_SIDEBAR_W - 16, 36 };
+    return (Rectangle){ 8, by - 44, 43, 36 };
+}
+static Rectangle ipanel_sweep_btn(int screen_h) {
+    int by = panel_bottom(screen_h);
+    return (Rectangle){ 8 + 43 + 8, by - 44, 43, 36 };
 }
 static Rectangle ipanel_toggle(int idx, int screen_h) {
     int py = panel_top(screen_h);
     return (Rectangle){ 8, py + 22 + idx * (IPANEL_TOGGLE_H + IPANEL_TOGGLE_GAP),
                         EDITOR_SIDEBAR_W - 16, IPANEL_TOGGLE_H };
+}
+
+/* ── File menu layout (in screen coords, inside the header) ──── */
+
+#define FILEMENU_BTN_X    (EDITOR_SIDEBAR_W + 8)
+#define FILEMENU_BTN_Y    3
+#define FILEMENU_BTN_W    70
+#define FILEMENU_BTN_H    24
+#define FILEMENU_ITEM_H   26
+#define FILEMENU_W        200
+#define FILEMENU_ITEM_COUNT 4
+
+static Rectangle filemenu_btn_rect(void) {
+    return (Rectangle){FILEMENU_BTN_X, FILEMENU_BTN_Y, FILEMENU_BTN_W, FILEMENU_BTN_H};
+}
+static Rectangle filemenu_item_rect(int i) {
+    return (Rectangle){
+        FILEMENU_BTN_X,
+        FILEMENU_BTN_Y + FILEMENU_BTN_H + i * FILEMENU_ITEM_H,
+        FILEMENU_W, FILEMENU_ITEM_H
+    };
 }
 
 /* ── canvas region (for main.c scissor) ───────────────────────── */
@@ -135,6 +164,89 @@ static void toggle_flip(EditorState *e, const char *name) {
         snprintf(t->name, SIM_NAME_LEN, "%s", name);
         t->value = SIG_HIGH; /* first click flips from default LOW to HIGH */
     }
+}
+
+/* ── file actions (used by File menu and keyboard shortcuts) ─── */
+
+static char *read_file_text(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len < 0) { fclose(f); return NULL; }
+    char *buf = malloc(len + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, len, f);
+    buf[got] = '\0';
+    fclose(f);
+    return buf;
+}
+
+static void reset_editor_state(EditorState *e) {
+    e->mode = MODE_IDLE;
+    e->place_kind = PLACE_NONE;
+    e->wire_src_node = -1;
+    e->drag_node = -1;
+    e->hover_node = -1;
+    e->hover_wire = -1;
+    e->counter_in = 0;
+    e->counter_out = 0;
+    e->counter_gate = 0;
+    e->toggle_count = 0;
+    e->track_count = 0;
+    e->has_run = 0;
+}
+
+static void action_new(EditorState *e, CanvasState *cs) {
+    canvas_free(cs);
+    *cs = (CanvasState){0};
+    reset_editor_state(e);
+    snprintf(e->file_path, sizeof(e->file_path), "untitled.dcs");
+    e->path_is_explicit = 0;
+    status(e, "New circuit");
+}
+
+static void action_save_as(EditorState *e, CanvasState *cs) {
+    char path[EDITOR_FILE_PATH_LEN] = {0};
+    if (!dialog_save_file("Save circuit as...", path, sizeof(path))) return;
+    char err[256] = {0};
+    if (editor_save(cs, path, err, sizeof(err)) == 0) {
+        snprintf(e->file_path, sizeof(e->file_path), "%s", path);
+        e->path_is_explicit = 1;
+        status(e, "Saved to %s", path);
+    } else {
+        status(e, "Save failed: %s", err);
+    }
+}
+
+static void action_save(EditorState *e, CanvasState *cs) {
+    if (!e->path_is_explicit) { action_save_as(e, cs); return; }
+    char err[256] = {0};
+    if (editor_save(cs, e->file_path, err, sizeof(err)) == 0)
+        status(e, "Saved to %s", e->file_path);
+    else
+        status(e, "Save failed: %s", err);
+}
+
+static void action_open(EditorState *e, CanvasState *cs, Camera2D *cam) {
+    char path[EDITOR_FILE_PATH_LEN] = {0};
+    if (!dialog_open_file("Open circuit...", path, sizeof(path))) return;
+    char *text = read_file_text(path);
+    if (!text) { status(e, "Cannot read %s", path); return; }
+    char err[256] = {0};
+    Circuit *c = parse_circuit(text, err, sizeof(err));
+    free(text);
+    if (!c) { status(e, "Parse error: %s", err); return; }
+    canvas_free(cs);
+    *cs = (CanvasState){0};
+    canvas_init(cs, c);
+    circuit_free(c);
+    reset_editor_state(e);
+    snprintf(e->file_path, sizeof(e->file_path), "%s", path);
+    e->path_is_explicit = 1;
+    if (cam) editor_fit_camera(cam, cs, GetScreenWidth(), GetScreenHeight());
+    status(e, "Opened %s", path);
 }
 
 void editor_init(EditorState *e, const CanvasState *cs, const char *file_path) {
@@ -268,19 +380,34 @@ int editor_save(const CanvasState *cs, const char *path, char *err_out, int err_
 
 /* ── RUN: simulate N steps and fill tracks ───────────────────── */
 
-static void run_simulation(EditorState *e, const CanvasState *cs) {
+static void run_simulation(EditorState *e, const CanvasState *cs, int sweep_mode) {
     char err[256] = {0};
     Circuit *c = canvas_to_circuit(cs, err, sizeof(err));
     if (!c) { e->track_count = 0; status(e, "Run failed: %s", err); return; }
-
-    int n = e->steps;
-    if (n < 1) n = 1;
-    if (n > EDITOR_MAX_STEPS) n = EDITOR_MAX_STEPS;
 
     int n_in  = c->input_count;
     int n_out = c->output_count;
     int total = n_in + n_out;
     if (total > EDITOR_MAX_TRACKS) total = EDITOR_MAX_TRACKS;
+
+    /* Determine step count. Sweep uses 2^n_in (capped at EDITOR_MAX_STEPS). */
+    int n;
+    int sweep_full = 0;            /* 1 if 2^n_in fits within the cap */
+    if (sweep_mode) {
+        if (n_in <= 0) {
+            n = 1;
+        } else if (n_in >= 30) {
+            n = EDITOR_MAX_STEPS;
+        } else {
+            int full = 1 << n_in;
+            if (full <= EDITOR_MAX_STEPS) { n = full; sweep_full = 1; }
+            else                          { n = EDITOR_MAX_STEPS; }
+        }
+    } else {
+        n = e->steps;
+        if (n < 1) n = 1;
+        if (n > EDITOR_MAX_STEPS) n = EDITOR_MAX_STEPS;
+    }
 
     /* set up track names + storage pointers */
     for (int i = 0; i < total; i++) {
@@ -295,7 +422,8 @@ static void run_simulation(EditorState *e, const CanvasState *cs) {
     /* simulate */
     for (int step = 0; step < n; step++) {
         for (int i = 0; i < n_in; i++) {
-            Signal v = toggle_get(e, c->input_names[i]);
+            Signal v = sweep_mode ? (Signal)((step >> i) & 1)
+                                  : toggle_get(e, c->input_names[i]);
             circuit_set_input(c, c->input_names[i], v);
         }
         circuit_run(c);
@@ -307,7 +435,14 @@ static void run_simulation(EditorState *e, const CanvasState *cs) {
 
     e->has_run = 1;
     circuit_free(c);
-    status(e, "Ran %d step%s", n, n == 1 ? "" : "s");
+    if (sweep_mode) {
+        if (sweep_full)
+            status(e, "Swept all 2^%d = %d combinations", n_in, n);
+        else
+            status(e, "Swept first %d of 2^%d combinations", n, n_in);
+    } else {
+        status(e, "Ran %d step%s", n, n == 1 ? "" : "s");
+    }
 }
 
 /* ── update ───────────────────────────────────────────────────── */
@@ -343,9 +478,14 @@ static void smart_rename_for_wire(CanvasState *cs, int src_idx, int dst_idx) {
 static int handle_input_panel_click(EditorState *e, CanvasState *cs, Vector2 mouse) {
     int sh = GetScreenHeight();
 
-    /* RUN button */
+    /* RUN button — uses static toggle values */
     if (CheckCollisionPointRec(mouse, ipanel_run_btn(sh))) {
-        run_simulation(e, cs);
+        run_simulation(e, cs, 0);
+        return 1;
+    }
+    /* SWEEP button — auto-generates the 2^N input pattern */
+    if (CheckCollisionPointRec(mouse, ipanel_sweep_btn(sh))) {
+        run_simulation(e, cs, 1);
         return 1;
     }
     /* Steps - / + */
@@ -384,13 +524,45 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
     int over_sidebar      = over_left && !over_top && !over_panel && !over_status;
     int over_inputs_panel = over_left && over_panel;
 
-    /* ESC always cancels current mode and clears selection */
+    /* ESC: close File menu first if open, otherwise cancel mode + clear selection */
     if (IsKeyPressed(KEY_ESCAPE)) {
-        e->mode = MODE_IDLE;
-        e->place_kind = PLACE_NONE;
-        e->wire_src_node = -1;
-        e->drag_node = -1;
-        canvas_clear_selection(cs);
+        if (e->file_menu_open) {
+            e->file_menu_open = 0;
+        } else {
+            e->mode = MODE_IDLE;
+            e->place_kind = PLACE_NONE;
+            e->wire_src_node = -1;
+            e->drag_node = -1;
+            canvas_clear_selection(cs);
+        }
+    }
+
+    /* File menu — handle button toggle and item clicks */
+    Rectangle fbtn = filemenu_btn_rect();
+    if (CheckCollisionPointRec(mouse_screen, fbtn) &&
+        IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        e->file_menu_open = !e->file_menu_open;
+        return;
+    }
+    if (e->file_menu_open) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            for (int i = 0; i < FILEMENU_ITEM_COUNT; i++) {
+                if (!CheckCollisionPointRec(mouse_screen, filemenu_item_rect(i))) continue;
+                e->file_menu_open = 0;
+                switch (i) {
+                    case 0: action_new    (e, cs);      break;
+                    case 1: action_open   (e, cs, cam); break;
+                    case 2: action_save   (e, cs);      break;
+                    case 3: action_save_as(e, cs);      break;
+                }
+                return;
+            }
+            /* Click outside any item closes the menu. */
+            e->file_menu_open = 0;
+            return;
+        }
+        /* While the menu is open, swallow other inputs. */
+        return;
     }
 
     /* Ctrl+A → select all */
@@ -609,20 +781,21 @@ void editor_update(EditorState *e, CanvasState *cs, Camera2D *cam) {
         }
     }
 
-    /* Ctrl+S → save */
-    if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) &&
-        IsKeyPressed(KEY_S)) {
-        char err[256] = {0};
-        if (editor_save(cs, e->file_path, err, sizeof(err)) == 0)
-            status(e, "Saved to %s", e->file_path);
-        else
-            status(e, "Save failed: %s", err);
+    /* File-menu keyboard shortcuts */
+    int ctrl  = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    int shift = IsKeyDown(KEY_LEFT_SHIFT)   || IsKeyDown(KEY_RIGHT_SHIFT);
+    if (ctrl && IsKeyPressed(KEY_N)) action_new (e, cs);
+    if (ctrl && IsKeyPressed(KEY_O)) action_open(e, cs, cam);
+    if (ctrl && IsKeyPressed(KEY_S)) {
+        if (shift) action_save_as(e, cs);
+        else       action_save   (e, cs);
     }
 
-    /* R → also runs (handy keyboard shortcut) */
+    /* R → run with static values, Shift+R → sweep */
     if (IsKeyPressed(KEY_R) &&
         !IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
-        run_simulation(e, cs);
+        int sweep_mode = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        run_simulation(e, cs, sweep_mode);
     }
 
     /* F → fit the view to the current circuit */
@@ -702,17 +875,29 @@ static void draw_inputs_panel(const EditorState *e, const CanvasState *cs, int s
     DrawText(step_lbl, (int)(EDITOR_SIDEBAR_W / 2 - tw / 2),
              (int)(minus_r.y + 3), 16, RAYWHITE);
 
-    /* RUN button */
+    /* RUN button (static toggle values) */
     Rectangle run_r = ipanel_run_btn(sh);
     Color run_bg = CheckCollisionPointRec(mp, run_r) ? (Color){80, 180, 110, 255}
                                                      : (Color){50, 140, 80, 255};
     DrawRectangleRec(run_r, run_bg);
     DrawRectangleLinesEx(run_r, 2, BLACK);
-    int rtw = MeasureText("RUN", 20);
+    int rtw = MeasureText("RUN", 16);
     DrawText("RUN",
              (int)(run_r.x + run_r.width / 2 - rtw / 2),
-             (int)(run_r.y + run_r.height / 2 - 10),
-             20, RAYWHITE);
+             (int)(run_r.y + run_r.height / 2 - 8),
+             16, RAYWHITE);
+
+    /* SWEEP button (auto 2^N input pattern) */
+    Rectangle sweep_r = ipanel_sweep_btn(sh);
+    Color sweep_bg = CheckCollisionPointRec(mp, sweep_r) ? (Color){90, 170, 200, 255}
+                                                         : (Color){60, 140, 170, 255};
+    DrawRectangleRec(sweep_r, sweep_bg);
+    DrawRectangleLinesEx(sweep_r, 2, BLACK);
+    int stw = MeasureText("SWEEP", 14);
+    DrawText("SWEEP",
+             (int)(sweep_r.x + sweep_r.width / 2 - stw / 2),
+             (int)(sweep_r.y + sweep_r.height / 2 - 7),
+             14, RAYWHITE);
 }
 
 void editor_draw(const EditorState *e, const CanvasState *cs, Camera2D cam,
@@ -760,8 +945,47 @@ void editor_draw(const EditorState *e, const CanvasState *cs, Camera2D cam,
     /* Header */
     DrawRectangle(EDITOR_SIDEBAR_W, 0, screen_w - EDITOR_SIDEBAR_W,
                   EDITOR_HEADER_H, (Color){200, 200, 200, 255});
-    DrawText(TextFormat("File: %s", e->file_path[0] ? e->file_path : "(none)"),
-             EDITOR_SIDEBAR_W + 10, 8, 16, BLACK);
+
+    /* File button */
+    Rectangle fbtn = filemenu_btn_rect();
+    Color fbg = e->file_menu_open                          ? (Color){170, 200, 230, 255}
+              : CheckCollisionPointRec(mp, fbtn)           ? (Color){180, 180, 180, 255}
+                                                           : (Color){220, 220, 220, 255};
+    DrawRectangleRec(fbtn, fbg);
+    DrawRectangleLinesEx(fbtn, 1, GRAY);
+    DrawText("File v", (int)fbtn.x + 12, (int)fbtn.y + 6, 14, BLACK);
+
+    /* Path label after the button */
+    DrawText(TextFormat("%s%s",
+                        e->file_path[0] ? e->file_path : "(none)",
+                        e->path_is_explicit ? "" : "  (unsaved)"),
+             (int)(fbtn.x + fbtn.width + 12), 8, 14, DARKGRAY);
+
+    /* Dropdown menu (drawn last so it overlays everything else) */
+    if (e->file_menu_open) {
+        struct { const char *label; const char *shortcut; } items[FILEMENU_ITEM_COUNT] = {
+            {"New",        "Ctrl+N"      },
+            {"Open...",    "Ctrl+O"      },
+            {"Save",       "Ctrl+S"      },
+            {"Save As...", "Ctrl+Shift+S"},
+        };
+        Rectangle box = {
+            FILEMENU_BTN_X, FILEMENU_BTN_Y + FILEMENU_BTN_H,
+            FILEMENU_W, FILEMENU_ITEM_H * FILEMENU_ITEM_COUNT
+        };
+        DrawRectangleRec(box, (Color){250, 250, 250, 255});
+        DrawRectangleLinesEx(box, 1, GRAY);
+        for (int i = 0; i < FILEMENU_ITEM_COUNT; i++) {
+            Rectangle r = filemenu_item_rect(i);
+            Color ibg = CheckCollisionPointRec(mp, r) ? (Color){180, 210, 240, 255}
+                                                     : (Color){250, 250, 250, 255};
+            DrawRectangleRec(r, ibg);
+            DrawText(items[i].label, (int)r.x + 12, (int)r.y + 7, 14, BLACK);
+            int sw_ = MeasureText(items[i].shortcut, 12);
+            DrawText(items[i].shortcut,
+                     (int)r.x + (int)r.width - sw_ - 10, (int)r.y + 8, 12, GRAY);
+        }
+    }
 
     /* Status bar */
     int sb_y = screen_h - EDITOR_STATUS_H;

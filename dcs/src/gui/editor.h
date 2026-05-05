@@ -54,6 +54,8 @@ typedef struct {
     int counter_gate;
 
     char   file_path[EDITOR_FILE_PATH_LEN];
+    int    path_is_explicit;     /* 1 if user picked the path, 0 for the default */
+    int    file_menu_open;       /* File dropdown is showing */
     char   status[EDITOR_STATUS_LEN];
     double status_until;
 
