@@ -1,0 +1,14 @@
+inputs: in1, in2, in3, in4, in5
+outputs: out1, out2, out3
+
+g1 = and(in1, in2)
+g2 = or(in2, in3)
+g3 = not(in3)
+g8 = not(g1)
+g5 = or(in4, in1)
+g4 = and(g5, g2)
+out2 = not(g4)
+out1 = or(g8, g4)
+g7 = or(in5, in4)
+g6 = or(g7, g3)
+out3 = and(g4, g6)

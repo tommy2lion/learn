@@ -1,0 +1,8 @@
+inputs: in1, in2, in3, in4
+outputs: out1, out2
+
+g4 = and(in1, in2)
+g5 = and(in2, in3)
+out1 = or(g4, g5)
+g6 = and(in3, in4)
+out2 = or(g5, g6)
