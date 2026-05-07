@@ -17,13 +17,10 @@ static void str_trim(char *s) {
     while (n > 0 && isspace((unsigned char)s[n - 1])) s[--n] = '\0';
 }
 
-static void strip_comment(char *s) {
-    char *h = strchr(s, '#');
-    if (h) *h = '\0';
-}
-
-/* Pull the next line. Returns 0 (line written, possibly empty after trim/comment)
-   or -1 at end of text. */
+/* Pull the next line. Returns 0 (line written, possibly empty after trim)
+   or -1 at end of text. NOTE: leaves any leading '#' intact so the caller can
+   distinguish `# @<annotation>` lines from regular comments. Inline comments
+   on structural lines are stripped by the caller. */
 static int next_line(const char *text, int *pos, char *out, int out_len) {
     if (!text[*pos]) return -1;
     int start = *pos;
@@ -34,7 +31,6 @@ static int next_line(const char *text, int *pos, char *out, int out_len) {
     memcpy(out, text + start, copy);
     out[copy] = '\0';
     if (copy > 0 && out[copy - 1] == '\r') out[--copy] = '\0';   /* CRLF */
-    strip_comment(out);
     str_trim(out);
     return 0;
 }
@@ -114,6 +110,52 @@ static circuit_t *fail(circuit_t *c, char *err_out, int err_len,
     return NULL;
 }
 
+/* Parse one layout-block entry: "  name = x, y" (already stripped of "# @").
+   Looks the name up in components / inputs / outputs and writes the position.
+   Unknown names are silently ignored (forward-compatible). */
+static void parse_layout_entry(circuit_t *c, const char *body) {
+    char buf[MAX_LINE];
+    snprintf(buf, sizeof(buf), "%s", body);
+    str_trim(buf);
+    char *eq = strchr(buf, '=');
+    if (!eq) return;
+    *eq = '\0';
+    char *name = buf;     str_trim(name);
+    char *vals = eq + 1;  str_trim(vals);
+    if (!*name || !*vals) return;
+
+    char *comma = strchr(vals, ',');
+    if (!comma) return;
+    *comma = '\0';
+    char *xs = vals;       str_trim(xs);
+    char *ys = comma + 1;  str_trim(ys);
+    float x = (float)atof(xs);
+    float y = (float)atof(ys);
+
+    if (strncmp(name, "__input:", 8) == 0) {
+        const char *iname = name + 8;
+        for (int i = 0; i < c->input_count; i++)
+            if (strcmp(c->input_names[i], iname) == 0) {
+                c->input_positions[i] = (vec2_t){x, y};
+                return;
+            }
+    } else if (strncmp(name, "__output:", 9) == 0) {
+        const char *oname = name + 9;
+        for (int i = 0; i < c->output_count; i++)
+            if (strcmp(c->output_names[i], oname) == 0) {
+                c->output_positions[i] = (vec2_t){x, y};
+                return;
+            }
+    } else {
+        for (int i = 0; i < c->component_count; i++)
+            if (strcmp(c->components[i]->name, name) == 0) {
+                c->components[i]->position = (vec2_t){x, y};
+                return;
+            }
+    }
+    /* unknown name: ignore */
+}
+
 /* ── public: parse ───────────────────────────────────────────────── */
 
 circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
@@ -124,10 +166,35 @@ circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
 
     int pos = 0, lineno = 0;
     int saw_inputs = 0, saw_outputs = 0;
+    int in_layout = 0;                       /* set after `# @layout` until blank/structural line */
     char line[MAX_LINE];
 
     while (next_line(text, &pos, line, MAX_LINE) == 0) {
         lineno++;
+        if (!line[0]) { in_layout = 0; continue; }
+
+        /* ── annotation / comment lines ──────────────────────────── */
+        if (line[0] == '#') {
+            /* "# @layout" enters layout mode (subsequent "# @  ..." lines are entries) */
+            if (strncmp(line, "# @layout", 9) == 0
+                && (line[9] == '\0' || isspace((unsigned char)line[9]))) {
+                in_layout = 1;
+                continue;
+            }
+            /* "# @  name = x, y" while in layout mode → position entry */
+            if (in_layout && strncmp(line, "# @", 3) == 0) {
+                parse_layout_entry(c, line + 3);
+                continue;
+            }
+            /* unknown annotation or plain comment: ignore (forward-compatible) */
+            continue;
+        }
+
+        /* ── structural line: strip any inline comment, then parse ── */
+        in_layout = 0;
+        char *hash = strchr(line, '#');
+        if (hash) *hash = '\0';
+        str_trim(line);
         if (!line[0]) continue;
 
         if (strncmp(line, "inputs:", 7) == 0) {
@@ -202,8 +269,26 @@ circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
 
 /* ── public: serialize ───────────────────────────────────────────── */
 
+/* True if any component / input / output position is non-zero. */
+static int has_layout_data(const circuit_t *c) {
+    for (int i = 0; i < c->component_count; i++) {
+        vec2_t p = c->components[i]->position;
+        if (p.x != 0 || p.y != 0) return 1;
+    }
+    for (int i = 0; i < c->input_count; i++) {
+        vec2_t p = c->input_positions[i];
+        if (p.x != 0 || p.y != 0) return 1;
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        vec2_t p = c->output_positions[i];
+        if (p.x != 0 || p.y != 0) return 1;
+    }
+    return 0;
+}
+
 char *circuit_io_serialize(const circuit_t *c) {
-    int cap = 4096 + c->component_count * 256;
+    int cap = 4096 + c->component_count * 256
+            + (c->input_count + c->output_count) * 96;
     char *buf = (char *)malloc(cap);
     if (!buf) return NULL;
     int pos = 0;
@@ -229,6 +314,28 @@ char *circuit_io_serialize(const circuit_t *c) {
         else
             pos += snprintf(buf + pos, cap - pos, "%s = %s(%s, %s)\n",
                             comp->name, kn, comp->in_wires[0], comp->in_wires[1]);
+    }
+
+    /* Optional layout-annotation block (Phase 2.6). Skipped when every
+       position is zero — preserves the prototype's compact format for
+       freshly-built circuits and keeps round-trips stable. */
+    if (has_layout_data(c)) {
+        pos += snprintf(buf + pos, cap - pos, "\n# @layout\n");
+        for (int i = 0; i < c->component_count; i++) {
+            vec2_t p = c->components[i]->position;
+            pos += snprintf(buf + pos, cap - pos, "# @  %s = %g, %g\n",
+                            c->components[i]->name, p.x, p.y);
+        }
+        for (int i = 0; i < c->input_count; i++) {
+            vec2_t p = c->input_positions[i];
+            pos += snprintf(buf + pos, cap - pos, "# @  __input:%s = %g, %g\n",
+                            c->input_names[i], p.x, p.y);
+        }
+        for (int i = 0; i < c->output_count; i++) {
+            vec2_t p = c->output_positions[i];
+            pos += snprintf(buf + pos, cap - pos, "# @  __output:%s = %g, %g\n",
+                            c->output_names[i], p.x, p.y);
+        }
     }
     return buf;
 }

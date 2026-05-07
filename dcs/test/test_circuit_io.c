@@ -219,6 +219,150 @@ static void test_error_syntax(void) {
     if (c) circuit_destroy(c);
 }
 
+/* ── Phase 2.6: layout annotation block ─────────────────────────── */
+
+static void test_parse_layout_block(void) {
+    const char *src =
+        "inputs: a, b\n"
+        "outputs: y\n"
+        "\n"
+        "y = and(a, b)\n"
+        "\n"
+        "# @layout\n"
+        "# @  y = 460, 380\n"
+        "# @  __input:a = 100, 320\n"
+        "# @  __input:b = 100, 440\n"
+        "# @  __output:y = 820, 380\n";
+    char err[128] = {0};
+    circuit_t *c = circuit_io_parse(src, err, sizeof(err));
+    check("layout: parse succeeds", c != NULL);
+    if (!c) { printf("  error: %s\n", err); return; }
+    check("layout: comp y x=460", c->components[0]->position.x == 460.0f);
+    check("layout: comp y y=380", c->components[0]->position.y == 380.0f);
+    check("layout: input a pos",  c->input_positions[0].x == 100.0f
+                               && c->input_positions[0].y == 320.0f);
+    check("layout: input b pos",  c->input_positions[1].x == 100.0f
+                               && c->input_positions[1].y == 440.0f);
+    check("layout: output y pos", c->output_positions[0].x == 820.0f
+                               && c->output_positions[0].y == 380.0f);
+    circuit_destroy(c);
+}
+
+static void test_unknown_annotation_ignored(void) {
+    /* `# @future = stuff` should be skipped without error */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "y = not(a)\n"
+        "# @somefuturetag\n"
+        "# @  another = 1, 2\n"   /* not in @layout, so ignored */
+        "# random comment\n";
+    char err[128] = {0};
+    circuit_t *c = circuit_io_parse(src, err, sizeof(err));
+    check("unknown annotation: parse succeeds", c != NULL);
+    if (c) circuit_destroy(c);
+}
+
+static void test_serialize_with_layout(void) {
+    /* build a circuit, set positions, serialize, look for the layout block */
+    circuit_t *c = circuit_create();
+    circuit_add_input(c,  "a");
+    circuit_add_input(c,  "b");
+    circuit_add_output(c, "y");
+    circuit_add_component(c, gate_and_create("y"), "a", "b");
+    /* set a few positions */
+    c->components[0]->position = (vec2_t){460, 380};
+    c->input_positions[0]      = (vec2_t){100, 320};
+    c->input_positions[1]      = (vec2_t){100, 440};
+    c->output_positions[0]     = (vec2_t){820, 380};
+
+    char *text = circuit_io_serialize(c);
+    check("ser-layout: non-NULL",        text != NULL);
+    if (!text) { circuit_destroy(c); return; }
+    check("ser-layout: has '# @layout'", strstr(text, "# @layout") != NULL);
+    check("ser-layout: has comp entry",  strstr(text, "# @  y = 460, 380") != NULL);
+    check("ser-layout: has __input:a",   strstr(text, "# @  __input:a = 100, 320") != NULL);
+    check("ser-layout: has __output:y",  strstr(text, "# @  __output:y = 820, 380") != NULL);
+    free(text);
+    circuit_destroy(c);
+}
+
+static void test_no_layout_when_zero_positions(void) {
+    /* fresh circuit with default (zero) positions: no layout block */
+    circuit_t *c = circuit_create();
+    circuit_add_input(c, "a");
+    circuit_add_output(c, "y");
+    circuit_add_component(c, gate_not_create("y"), "a", NULL);
+    char *text = circuit_io_serialize(c);
+    check("zero-pos: no layout block",   strstr(text, "# @layout") == NULL);
+    free(text);
+    circuit_destroy(c);
+}
+
+static void test_round_trip_with_positions(void) {
+    /* build → set positions → serialize → parse → positions identical */
+    circuit_t *c1 = circuit_create();
+    circuit_add_input(c1,  "a");
+    circuit_add_input(c1,  "b");
+    circuit_add_output(c1, "sum");
+    circuit_add_output(c1, "carry");
+    circuit_add_component(c1, gate_and_create("carry"),   "a", "b");
+    circuit_add_component(c1, gate_or_create ("a_or_b"),  "a", "b");
+    circuit_add_component(c1, gate_not_create("n_carry"), "carry", NULL);
+    circuit_add_component(c1, gate_and_create("sum"),     "a_or_b", "n_carry");
+
+    c1->input_positions[0]  = (vec2_t){100,  320};
+    c1->input_positions[1]  = (vec2_t){100,  440};
+    c1->components[0]->position = (vec2_t){280, 320};
+    c1->components[1]->position = (vec2_t){280, 440};
+    c1->components[2]->position = (vec2_t){460, 320};
+    c1->components[3]->position = (vec2_t){640, 380};
+    c1->output_positions[0] = (vec2_t){820, 380};
+    c1->output_positions[1] = (vec2_t){820, 320};
+
+    char *text = circuit_io_serialize(c1);
+    check("rt-layout: serialize", text != NULL);
+    if (!text) { circuit_destroy(c1); return; }
+
+    char err[128] = {0};
+    circuit_t *c2 = circuit_io_parse(text, err, sizeof(err));
+    check("rt-layout: re-parse",  c2 != NULL);
+    if (!c2) { printf("  err=%s\n", err); free(text); circuit_destroy(c1); return; }
+
+    check("rt-layout: in_a pos",     c2->input_positions[0].x == 100 && c2->input_positions[0].y == 320);
+    check("rt-layout: in_b pos",     c2->input_positions[1].x == 100 && c2->input_positions[1].y == 440);
+    check("rt-layout: carry pos",    c2->components[0]->position.x == 280 && c2->components[0]->position.y == 320);
+    check("rt-layout: a_or_b pos",   c2->components[1]->position.x == 280 && c2->components[1]->position.y == 440);
+    check("rt-layout: n_carry pos",  c2->components[2]->position.x == 460 && c2->components[2]->position.y == 320);
+    check("rt-layout: sum pos",      c2->components[3]->position.x == 640 && c2->components[3]->position.y == 380);
+    check("rt-layout: out sum pos",  c2->output_positions[0].x == 820 && c2->output_positions[0].y == 380);
+    check("rt-layout: out carry pos",c2->output_positions[1].x == 820 && c2->output_positions[1].y == 320);
+
+    free(text);
+    circuit_destroy(c1);
+    circuit_destroy(c2);
+}
+
+static void test_load_no_layout_then_save_no_layout(void) {
+    /* prototype-style file (no layout block) loads fine; positions stay zero;
+       saving back produces no layout block — preserving the lean format. */
+    const char *src =
+        "inputs: a, b\n"
+        "outputs: y\n"
+        "y = and(a, b)\n";
+    char err[128] = {0};
+    circuit_t *c = circuit_io_parse(src, err, sizeof(err));
+    check("no-layout-load: ok", c != NULL);
+    if (!c) { printf("  err=%s\n", err); return; }
+    check("no-layout-load: comp pos zero",
+          c->components[0]->position.x == 0 && c->components[0]->position.y == 0);
+    char *text = circuit_io_serialize(c);
+    check("no-layout-load: re-serialize has no layout",
+          strstr(text, "# @layout") == NULL);
+    free(text);
+    circuit_destroy(c);
+}
+
 int main(void) {
     printf("=== domain: circuit_io tests ===\n");
     test_parse_and_gate();
@@ -229,6 +373,13 @@ int main(void) {
     test_round_trip();
     test_error_undef_wire();
     test_error_syntax();
+    /* Phase 2.6 */
+    test_parse_layout_block();
+    test_unknown_annotation_ignored();
+    test_serialize_with_layout();
+    test_no_layout_when_zero_positions();
+    test_round_trip_with_positions();
+    test_load_no_layout_then_save_no_layout();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }
