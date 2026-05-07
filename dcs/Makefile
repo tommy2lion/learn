@@ -22,6 +22,22 @@ FW_GRAPH_HDR = src/framework/graphics/igraph.h \
                src/framework/core/color.h \
                src/framework/core/rect.h
 
+# ── Phase 2.3 (part 1) sources ─────────────────────────────────────
+FW_WIDGET_SRC = src/framework/core/focus_manager.c \
+                src/framework/core/quit_manager.c \
+                src/framework/widgets/frame.c \
+                src/framework/widgets/panel.c \
+                src/framework/widgets/button.c \
+                src/framework/widgets/label.c
+FW_WIDGET_HDR = src/framework/core/focus_manager.h \
+                src/framework/core/quit_manager.h \
+                src/framework/core/message.h \
+                src/framework/widgets/widget.h \
+                src/framework/widgets/frame.h \
+                src/framework/widgets/panel.h \
+                src/framework/widgets/button.h \
+                src/framework/widgets/label.h
+
 # ── Phase 2.1: iplatform unit tests ────────────────────────────────
 TEST_IPLATFORM_SRC = test/test_iplatform.c
 TEST_IPLATFORM_EXE = test/test_iplatform.exe
@@ -42,11 +58,34 @@ $(TEST_IGRAPH_EXE): $(FW_GRAPH_SRC) $(FW_GRAPH_HDR) $(TEST_IGRAPH_SRC)
 test_igraph: $(TEST_IGRAPH_EXE)
 	./$(TEST_IGRAPH_EXE)
 
-# ── future phases (2.3 widgets, ...) hook in here ──────────────────
+# ── Phase 2.3 (part 1): widget framework ──────────────────────────
+# Offline structural test for widget framework — does not open a window.
+TEST_WIDGETS_SRC = test/test_widgets.c
+TEST_WIDGETS_EXE = test/test_widgets.exe
 
-.PHONY: test test_iplatform test_igraph clean
+$(TEST_WIDGETS_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) $(TEST_WIDGETS_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) $(FW_WIDGET_SRC) $(TEST_WIDGETS_SRC) -o $@
 
-test: test_iplatform test_igraph
+test_widgets: $(TEST_WIDGETS_EXE)
+	./$(TEST_WIDGETS_EXE)
+
+# Windowed end-to-end demo. Run manually: `make demo` then close the window.
+DEMO_SRC = demo/framework_demo.c
+DEMO_EXE = demo/framework_demo.exe
+
+$(DEMO_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO_SRC) \
+             $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO_SRC) \
+		-o $@ -lcomdlg32 $(RAYLIB_LDFL)
+
+demo: $(DEMO_EXE)
+
+# ── future phases (2.3 part 2 widgets, 2.4 domain, ...) ───────────
+
+.PHONY: test test_iplatform test_igraph test_widgets demo clean
+
+test: test_iplatform test_igraph test_widgets
 
 clean:
-	rm -f test/*.exe test/*.o
+	rm -f test/*.exe test/*.o demo/*.exe
