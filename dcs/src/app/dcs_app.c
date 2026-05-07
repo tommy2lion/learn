@@ -229,22 +229,46 @@ static void build_widgets(dcs_app_t *app) {
     app->status_label = label_create((rect_t){0, sh - STATUS_H, sw, STATUS_H},
                                      "", 14, 0xC8C8C8FFu);
     /* status drawn over a dark band; we add a panel underneath for the bg */
-    panel_t *status_bg = panel_create((rect_t){0, sh - STATUS_H, sw, STATUS_H});
-    panel_set_background(status_bg, 0x282832FFu);
+    app->status_bg = panel_create((rect_t){0, sh - STATUS_H, sw, STATUS_H});
+    panel_set_background(app->status_bg, 0x282832FFu);
 
     /* Header background is part of the root panel; menu draws over it */
-    panel_t *header_bg = panel_create((rect_t){0, 0, sw, HEADER_H});
-    panel_set_background(header_bg, 0xC8C8C8FFu);
+    app->header_bg = panel_create((rect_t){0, 0, sw, HEADER_H});
+    panel_set_background(app->header_bg, 0xC8C8C8FFu);
 
-    /* Compose: status_bg + timing + input_panel + canvas + toolbar + header_bg + file_menu + status_label */
+    /* Compose: header_bg/status_bg sit BENEATH content (added first) so the
+       canvas, toolbar, etc. paint on top. The file menu is added LAST so its
+       expanded-on-open bounds covers everything for click capture. */
+    panel_add_child(app->root, &app->header_bg->base);
+    panel_add_child(app->root, &app->status_bg->base);
     panel_add_child(app->root, &app->circuit_canvas->base);
     panel_add_child(app->root, &app->toolbar->base);
     panel_add_child(app->root, &app->timing_canvas->base);
     panel_add_child(app->root, &app->input_panel->base);
-    panel_add_child(app->root, &header_bg->base);
-    panel_add_child(app->root, &app->file_menu->base);
-    panel_add_child(app->root, &status_bg->base);
     panel_add_child(app->root, &app->status_label->base);
+    panel_add_child(app->root, &app->file_menu->base);
+}
+
+/* Recompute every widget's bounds when the window is resized. */
+static void relayout(dcs_app_t *app, int sw, int sh) {
+    float panel_top = (float)(sh - STATUS_H - BOTTOM_PANEL_H);
+
+    app->root->base.bounds          = (rect_t){0, 0, sw, sh};
+    app->header_bg->base.bounds     = (rect_t){0, 0, sw, HEADER_H};
+    app->status_bg->base.bounds     = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
+    app->status_label->base.bounds  = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
+    app->toolbar->base.bounds       = (rect_t){0, HEADER_H, SIDEBAR_W, panel_top - HEADER_H};
+    app->circuit_canvas->base.bounds= (rect_t){SIDEBAR_W, HEADER_H,
+                                               sw - SIDEBAR_W, panel_top - HEADER_H};
+    app->timing_canvas->base.bounds = (rect_t){SIDEBAR_W, panel_top,
+                                               sw - SIDEBAR_W, BOTTOM_PANEL_H};
+    app->input_panel->base.bounds   = (rect_t){0, panel_top, SIDEBAR_W, BOTTOM_PANEL_H};
+    /* file_menu trigger stays anchored top-left; its base.bounds tracks the
+       trigger when closed and (via menu's own logic) the parent when open. */
+}
+
+static void on_frame_resize(int new_w, int new_h, void *user) {
+    relayout((dcs_app_t *)user, new_w, new_h);
 }
 
 /* ── public API ──────────────────────────────────────────────────── */
@@ -262,6 +286,8 @@ void dcs_app_init(dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *init
     frame_init(&self->frame, g, p, &self->root->base);
     /* ESC must NOT quit — circuit_canvas uses ESC to cancel modes. */
     frame_quit(&self->frame)->esc_quits = 0;
+    /* Re-layout widgets when the user maximizes / resizes / restores. */
+    frame_set_resize_cb(&self->frame, on_frame_resize, self);
 
     /* If an initial path was given and the file exists, load it. */
     if (initial_path) {

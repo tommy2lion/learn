@@ -27,6 +27,8 @@ class tagt_dcs_app {
 
     /* widgets (composed under root) */
     panel_t                 *root;
+    panel_t                 *header_bg;
+    panel_t                 *status_bg;
     side_toolbar_t          *toolbar;
     circuit_canvas_widget_t *circuit_canvas;
     timing_canvas_widget_t  *timing_canvas;

@@ -54,12 +54,31 @@ void frame_init(frame_t *self, igraph_t *g, iplatform_t *p, widget_t *root) {
 focus_manager_t *frame_focus(frame_t *self) { return &self->focus; }
 quit_manager_t  *frame_quit (frame_t *self) { return &self->quit;  }
 
+void frame_set_resize_cb(frame_t *self, frame_resize_fn_t cb, void *user) {
+    self->on_resize   = cb;
+    self->resize_user = user;
+}
+
 void frame_tick(frame_t *self) {
     igraph_t *g = self->graph;
 
     /* Reset cursor each tick — widgets opt into NS_RESIZE / EW_RESIZE / etc.
        only while actively hovered. */
     g->set_cursor(g->self, CURSOR_DEFAULT);
+
+    /* Detect window-size changes between ticks. The first call is treated
+       as the initial size and doesn't fire the callback; subsequent
+       differences (maximize, drag-resize, restore, …) do. */
+    int sw = 0, sh = 0;
+    g->screen_size(g->self, &sw, &sh);
+    if (self->last_w == 0 && self->last_h == 0) {
+        self->last_w = sw;
+        self->last_h = sh;
+    } else if (sw != self->last_w || sh != self->last_h) {
+        self->last_w = sw;
+        self->last_h = sh;
+        if (self->on_resize) self->on_resize(sw, sh, self->resize_user);
+    }
 
     /* ── poll input and synthesise events ──────────────────────── */
     vec2_t   mp   = g->mouse_position(g->self);
