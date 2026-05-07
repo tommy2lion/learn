@@ -22,6 +22,20 @@ FW_GRAPH_HDR = src/framework/graphics/igraph.h \
                src/framework/core/color.h \
                src/framework/core/rect.h
 
+# ── Phase 2.4 domain sources ───────────────────────────────────────
+DOMAIN_SRC = src/domain/gate_and.c \
+             src/domain/gate_or.c \
+             src/domain/gate_not.c \
+             src/domain/circuit.c \
+             src/domain/circuit_io.c \
+             src/domain/waveform.c \
+             src/domain/simulation.c
+DOMAIN_HDR = src/domain/component.h \
+             src/domain/circuit.h \
+             src/domain/circuit_io.h \
+             src/domain/waveform.h \
+             src/domain/simulation.h
+
 # ── Phase 2.3 sources ──────────────────────────────────────────────
 FW_WIDGET_SRC = src/framework/core/focus_manager.c \
                 src/framework/core/quit_manager.c \
@@ -96,11 +110,42 @@ $(DEMO2_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO2_SRC) \
 demo:  $(DEMO1_EXE)
 demos: $(DEMO1_EXE) $(DEMO2_EXE)
 
-# ── future phases (2.4 domain, ...) ────────────────────────────────
+# ── Phase 2.4: domain layer + CLI + ported tests ───────────────────
+TEST_CIRCUIT_SRC    = test/test_circuit.c
+TEST_CIRCUIT_EXE    = test/test_circuit.exe
+TEST_CIRCUIT_IO_SRC = test/test_circuit_io.c
+TEST_CIRCUIT_IO_EXE = test/test_circuit_io.exe
+TEST_CLI_SH         = test/test_cli.sh
 
-.PHONY: test test_iplatform test_igraph test_widgets demo demos clean
+$(TEST_CIRCUIT_EXE): $(DOMAIN_SRC) $(DOMAIN_HDR) $(TEST_CIRCUIT_SRC)
+	$(CC) $(CFLAGS) $(DOMAIN_SRC) $(TEST_CIRCUIT_SRC) -o $@
 
-test: test_iplatform test_igraph test_widgets
+test_circuit: $(TEST_CIRCUIT_EXE)
+	./$(TEST_CIRCUIT_EXE)
+
+$(TEST_CIRCUIT_IO_EXE): $(DOMAIN_SRC) $(DOMAIN_HDR) $(TEST_CIRCUIT_IO_SRC)
+	$(CC) $(CFLAGS) $(DOMAIN_SRC) $(TEST_CIRCUIT_IO_SRC) -o $@
+
+test_circuit_io: $(TEST_CIRCUIT_IO_EXE)
+	./$(TEST_CIRCUIT_IO_EXE)
+
+# new dcs_cli built on the new domain layer (still uses iplatform's read_file)
+CLI_SRC  = cli/main.c
+CLI_EXE  = dcs_cli.exe
+
+$(CLI_EXE): $(FW_PLATFORM_SRC) $(FW_PLATFORM_HDR) $(DOMAIN_SRC) $(DOMAIN_HDR) $(CLI_SRC)
+	$(CC) $(CFLAGS) $(FW_PLATFORM_SRC) $(DOMAIN_SRC) $(CLI_SRC) -o $@ -lcomdlg32
+
+cli: $(CLI_EXE)
+
+test_cli: $(CLI_EXE) $(TEST_CLI_SH)
+	sh $(TEST_CLI_SH)
+
+# ── future phases (2.5 app widgets, ...) ───────────────────────────
+
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli cli demo demos clean
+
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli
 
 clean:
-	rm -f test/*.exe test/*.o demo/*.exe
+	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE)

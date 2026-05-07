@@ -1,0 +1,7 @@
+inputs: a, b
+outputs: sum, carry
+
+carry   = and(a, b)
+a_or_b  = or(a, b)
+n_carry = not(carry)
+sum     = and(a_or_b, n_carry)
