@@ -18,10 +18,12 @@ class tagt_circuit {
     int           wire_count;
     int           wire_cap;
 
-    char  input_names [DOMAIN_MAX_IO][DOMAIN_NAME_LEN];
-    int   input_count;
-    char  output_names[DOMAIN_MAX_IO][DOMAIN_NAME_LEN];
-    int   output_count;
+    char   input_names    [DOMAIN_MAX_IO][DOMAIN_NAME_LEN];
+    vec2_t input_positions[DOMAIN_MAX_IO];     /* layout px coords (Phase 2.6) */
+    int    input_count;
+    char   output_names    [DOMAIN_MAX_IO][DOMAIN_NAME_LEN];
+    vec2_t output_positions[DOMAIN_MAX_IO];
+    int    output_count;
 };
 typedef class tagt_circuit circuit_t;
 

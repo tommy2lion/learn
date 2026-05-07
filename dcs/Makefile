@@ -22,6 +22,22 @@ FW_GRAPH_HDR = src/framework/graphics/igraph.h \
                src/framework/core/color.h \
                src/framework/core/rect.h
 
+# ── Phase 2.5 app sources ──────────────────────────────────────────
+APP_SRC = src/app/circuit_canvas_widget.c \
+          src/app/timing_canvas_widget.c \
+          src/app/side_toolbar.c \
+          src/app/input_panel.c \
+          src/app/dcs_app.c
+APP_HDR = src/app/editor_state.h \
+          src/app/circuit_canvas_widget.h \
+          src/app/timing_canvas_widget.h \
+          src/app/side_toolbar.h \
+          src/app/input_panel.h \
+          src/app/dcs_app.h
+
+GUI_SRC = src/gui/main.c
+GUI_EXE = dcs_gui.exe
+
 # ── Phase 2.4 domain sources ───────────────────────────────────────
 DOMAIN_SRC = src/domain/gate_and.c \
              src/domain/gate_or.c \
@@ -141,11 +157,23 @@ cli: $(CLI_EXE)
 test_cli: $(CLI_EXE) $(TEST_CLI_SH)
 	sh $(TEST_CLI_SH)
 
-# ── future phases (2.5 app widgets, ...) ───────────────────────────
+# ── Phase 2.5: dcs_gui (app on framework + domain) ─────────────────
+$(GUI_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) \
+            $(DOMAIN_SRC) $(APP_SRC) $(GUI_SRC) \
+            $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR) \
+            $(DOMAIN_HDR) $(APP_HDR)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) \
+		$(DOMAIN_SRC) $(APP_SRC) $(GUI_SRC) \
+		-o $@ -lcomdlg32 $(RAYLIB_LDFL)
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli cli demo demos clean
+gui: $(GUI_EXE)
+
+# ── future phases (2.6 layout block, ...) ──────────────────────────
+
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli cli gui demo demos clean
 
 test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli
 
 clean:
-	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE)
+	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
