@@ -8,10 +8,16 @@
 
 /* ── layout constants ────────────────────────────────────────────── */
 
-#define HEADER_H        30
-#define SIDEBAR_W      110
-#define STATUS_H        24
-#define BOTTOM_PANEL_H 240
+#define HEADER_H               30
+#define STATUS_H               24
+#define DIVIDER_HOVER          10        /* hover band thickness in px */
+
+#define SIDEBAR_W_DEFAULT     140        /* wider initial sidebar — fits SWEEP/etc */
+#define SIDEBAR_W_MIN         110
+#define BOTTOM_PANEL_H_DEFAULT 240
+#define PANEL_H_MIN            80
+#define CANVAS_H_MIN          100
+#define RIGHT_W_MIN           240        /* minimum width for canvas/timing column */
 
 /* ── status line ─────────────────────────────────────────────────── */
 
@@ -182,40 +188,114 @@ static void poll_global_shortcuts(dcs_app_t *app) {
     }
 }
 
+/* ── layout helpers ──────────────────────────────────────────────── */
+
+/* Clamp panel_h and sidebar_w against the current screen dimensions so a
+   small window can't squeeze any region below its minimum. */
+static void clamp_layout(dcs_app_t *app, int sw, int sh) {
+    int panel_h_max = sh - HEADER_H - STATUS_H - CANVAS_H_MIN;
+    if (panel_h_max < PANEL_H_MIN) panel_h_max = PANEL_H_MIN;
+    if (app->panel_h < PANEL_H_MIN) app->panel_h = PANEL_H_MIN;
+    if (app->panel_h > panel_h_max) app->panel_h = panel_h_max;
+
+    int sidebar_w_max = sw - RIGHT_W_MIN;
+    if (sidebar_w_max < SIDEBAR_W_MIN) sidebar_w_max = SIDEBAR_W_MIN;
+    if (app->sidebar_w < SIDEBAR_W_MIN) app->sidebar_w = SIDEBAR_W_MIN;
+    if (app->sidebar_w > sidebar_w_max) app->sidebar_w = sidebar_w_max;
+}
+
+/* Recompute every widget's bounds from current screen size + runtime
+   sidebar_w / panel_h. Called on init, on resize, and on divider drag. */
+static void relayout(dcs_app_t *app, int sw, int sh) {
+    clamp_layout(app, sw, sh);
+    int sb_w  = app->sidebar_w;
+    int pan_h = app->panel_h;
+    int panel_top = sh - STATUS_H - pan_h;
+
+    app->root->base.bounds          = (rect_t){0, 0, sw, sh};
+    app->header_bg->base.bounds     = (rect_t){0, 0, sw, HEADER_H};
+    app->status_bg->base.bounds     = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
+    app->status_label->base.bounds  = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
+    app->toolbar->base.bounds       = (rect_t){0, HEADER_H, sb_w, panel_top - HEADER_H};
+    app->circuit_canvas->base.bounds= (rect_t){sb_w, HEADER_H,
+                                               sw - sb_w, panel_top - HEADER_H};
+    app->timing_canvas->base.bounds = (rect_t){sb_w, panel_top, sw - sb_w, pan_h};
+    app->input_panel->base.bounds   = (rect_t){0, panel_top, sb_w, pan_h};
+    /* horizontal divider: a hover band centred on panel_top */
+    if (app->div_h) {
+        app->div_h->base.bounds = (rect_t){0, panel_top - DIVIDER_HOVER * 0.5f,
+                                           sw, DIVIDER_HOVER};
+        divider_widget_set_range(app->div_h,
+                                 HEADER_H + CANVAS_H_MIN,
+                                 sh - STATUS_H - PANEL_H_MIN);
+    }
+    /* vertical divider: a hover band centred on sb_w (only over the canvas
+       area, not the bottom panel — keeps the input panel's clicks clean) */
+    if (app->div_v) {
+        app->div_v->base.bounds = (rect_t){sb_w - DIVIDER_HOVER * 0.5f, HEADER_H,
+                                           DIVIDER_HOVER, sh - HEADER_H - STATUS_H};
+        int sw_max = sw - RIGHT_W_MIN;
+        if (sw_max < SIDEBAR_W_MIN) sw_max = SIDEBAR_W_MIN;
+        divider_widget_set_range(app->div_v, SIDEBAR_W_MIN, sw_max);
+    }
+}
+
+/* Divider drag callbacks. The divider reports the new mouse coordinate;
+   we translate it to the panel_h / sidebar_w field and re-layout. */
+static void on_divider_h(int new_y, void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    int sw = 0, sh = 0;
+    app->graph->screen_size(app->graph->self, &sw, &sh);
+    app->panel_h = sh - STATUS_H - new_y;
+    relayout(app, sw, sh);
+}
+
+static void on_divider_v(int new_x, void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    int sw = 0, sh = 0;
+    app->graph->screen_size(app->graph->self, &sw, &sh);
+    app->sidebar_w = new_x;
+    relayout(app, sw, sh);
+}
+
 /* ── widget tree construction ────────────────────────────────────── */
 
 static void build_widgets(dcs_app_t *app) {
     int sw = 1280, sh = 800;
     if (app->graph->screen_size) app->graph->screen_size(app->graph->self, &sw, &sh);
 
-    /* Layout regions:
-       header     (0..30,                      0..sw)
-       sidebar    (30..sh-STATUS-PANEL_H,      0..SIDEBAR_W)
-       canvas     (30..sh-STATUS-PANEL_H,      SIDEBAR_W..sw)
-       input pan  (sh-STATUS-PANEL_H..sh-STATUS, 0..SIDEBAR_W)
-       timing cv  (sh-STATUS-PANEL_H..sh-STATUS, SIDEBAR_W..sw)
-       status bar (sh-STATUS..sh, 0..sw)
-     */
-    float panel_top = (float)(sh - STATUS_H - BOTTOM_PANEL_H);
+    /* Initial layout values */
+    app->sidebar_w = SIDEBAR_W_DEFAULT;
+    app->panel_h   = BOTTOM_PANEL_H_DEFAULT;
+    clamp_layout(app, sw, sh);
+
+    int sb_w  = app->sidebar_w;
+    int pan_h = app->panel_h;
+    int panel_top = sh - STATUS_H - pan_h;
 
     app->root = panel_create((rect_t){0, 0, sw, sh});
     panel_set_background(app->root, COLOR_BG);
 
-    /* Sidebar */
     app->circuit_canvas = circuit_canvas_widget_create(
-        (rect_t){SIDEBAR_W, HEADER_H, sw - SIDEBAR_W, panel_top - HEADER_H},
+        (rect_t){sb_w, HEADER_H, sw - sb_w, panel_top - HEADER_H},
         app->circuit);
     circuit_canvas_widget_set_status_cb(app->circuit_canvas, on_canvas_status, app);
 
-    app->toolbar = side_toolbar_create((rect_t){0, HEADER_H, SIDEBAR_W, panel_top - HEADER_H},
+    app->toolbar = side_toolbar_create((rect_t){0, HEADER_H, sb_w, panel_top - HEADER_H},
                                        app->circuit_canvas);
 
     app->timing_canvas = timing_canvas_widget_create(
-        (rect_t){SIDEBAR_W, panel_top, sw - SIDEBAR_W, BOTTOM_PANEL_H});
+        (rect_t){sb_w, panel_top, sw - sb_w, pan_h});
 
     app->input_panel = input_panel_create(
-        (rect_t){0, panel_top, SIDEBAR_W, BOTTOM_PANEL_H}, app->circuit);
+        (rect_t){0, panel_top, sb_w, pan_h}, app->circuit);
     input_panel_set_run_cb(app->input_panel, on_run, app);
+
+    /* Dividers: bounds computed in relayout(). */
+    app->div_h = divider_widget_create((rect_t){0, 0, 1, 1}, DIVIDER_HORIZONTAL);
+    divider_widget_set_change_cb(app->div_h, on_divider_h, app);
+    app->div_v = divider_widget_create((rect_t){0, 0, 1, 1}, DIVIDER_VERTICAL);
+    divider_widget_set_change_cb(app->div_v, on_divider_v, app);
 
     /* File menu (header) */
     app->file_menu = menu_create((rect_t){8, 4, 80, 22}, "File");
@@ -228,43 +308,26 @@ static void build_widgets(dcs_app_t *app) {
     /* Status label */
     app->status_label = label_create((rect_t){0, sh - STATUS_H, sw, STATUS_H},
                                      "", 14, 0xC8C8C8FFu);
-    /* status drawn over a dark band; we add a panel underneath for the bg */
     app->status_bg = panel_create((rect_t){0, sh - STATUS_H, sw, STATUS_H});
     panel_set_background(app->status_bg, 0x282832FFu);
-
-    /* Header background is part of the root panel; menu draws over it */
     app->header_bg = panel_create((rect_t){0, 0, sw, HEADER_H});
     panel_set_background(app->header_bg, 0xC8C8C8FFu);
 
-    /* Compose: header_bg/status_bg sit BENEATH content (added first) so the
-       canvas, toolbar, etc. paint on top. The file menu is added LAST so its
-       expanded-on-open bounds covers everything for click capture. */
+    /* Compose: bgs first (under content), then content widgets, then dividers
+       on TOP of content (so they win hit-tests inside their hover bands), then
+       file menu LAST (its expanded-on-open bounds covers everything). */
     panel_add_child(app->root, &app->header_bg->base);
     panel_add_child(app->root, &app->status_bg->base);
     panel_add_child(app->root, &app->circuit_canvas->base);
     panel_add_child(app->root, &app->toolbar->base);
     panel_add_child(app->root, &app->timing_canvas->base);
     panel_add_child(app->root, &app->input_panel->base);
+    panel_add_child(app->root, &app->div_h->base);
+    panel_add_child(app->root, &app->div_v->base);
     panel_add_child(app->root, &app->status_label->base);
     panel_add_child(app->root, &app->file_menu->base);
-}
 
-/* Recompute every widget's bounds when the window is resized. */
-static void relayout(dcs_app_t *app, int sw, int sh) {
-    float panel_top = (float)(sh - STATUS_H - BOTTOM_PANEL_H);
-
-    app->root->base.bounds          = (rect_t){0, 0, sw, sh};
-    app->header_bg->base.bounds     = (rect_t){0, 0, sw, HEADER_H};
-    app->status_bg->base.bounds     = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
-    app->status_label->base.bounds  = (rect_t){0, sh - STATUS_H, sw, STATUS_H};
-    app->toolbar->base.bounds       = (rect_t){0, HEADER_H, SIDEBAR_W, panel_top - HEADER_H};
-    app->circuit_canvas->base.bounds= (rect_t){SIDEBAR_W, HEADER_H,
-                                               sw - SIDEBAR_W, panel_top - HEADER_H};
-    app->timing_canvas->base.bounds = (rect_t){SIDEBAR_W, panel_top,
-                                               sw - SIDEBAR_W, BOTTOM_PANEL_H};
-    app->input_panel->base.bounds   = (rect_t){0, panel_top, SIDEBAR_W, BOTTOM_PANEL_H};
-    /* file_menu trigger stays anchored top-left; its base.bounds tracks the
-       trigger when closed and (via menu's own logic) the parent when open. */
+    relayout(app, sw, sh);   /* sets divider bounds + ranges */
 }
 
 static void on_frame_resize(int new_w, int new_h, void *user) {

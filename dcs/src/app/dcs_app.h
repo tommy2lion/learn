@@ -12,6 +12,7 @@
 #include "timing_canvas_widget.h"
 #include "side_toolbar.h"
 #include "input_panel.h"
+#include "divider_widget.h"
 #include "../domain/circuit.h"
 #include "../domain/simulation.h"
 
@@ -32,10 +33,15 @@ class tagt_dcs_app {
     side_toolbar_t          *toolbar;
     circuit_canvas_widget_t *circuit_canvas;
     timing_canvas_widget_t  *timing_canvas;
-    splitter_t              *vsplit;       /* canvas above, timing below */
     input_panel_t           *input_panel;
     menu_t                  *file_menu;
     label_t                 *status_label;
+    divider_widget_t        *div_h;        /* between canvas + bottom panel */
+    divider_widget_t        *div_v;        /* between sidebar + canvas      */
+
+    /* runtime layout values (mutated by divider drags) */
+    int sidebar_w;
+    int panel_h;
 
     /* file path bookkeeping */
     char  file_path[DCS_APP_FILE_PATH_LEN];

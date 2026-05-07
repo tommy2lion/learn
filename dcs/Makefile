@@ -27,12 +27,14 @@ APP_SRC = src/app/circuit_canvas_widget.c \
           src/app/timing_canvas_widget.c \
           src/app/side_toolbar.c \
           src/app/input_panel.c \
+          src/app/divider_widget.c \
           src/app/dcs_app.c
 APP_HDR = src/app/editor_state.h \
           src/app/circuit_canvas_widget.h \
           src/app/timing_canvas_widget.h \
           src/app/side_toolbar.h \
           src/app/input_panel.h \
+          src/app/divider_widget.h \
           src/app/dcs_app.h
 
 GUI_SRC = src/gui/main.c
