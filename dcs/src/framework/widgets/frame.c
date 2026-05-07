@@ -57,6 +57,10 @@ quit_manager_t  *frame_quit (frame_t *self) { return &self->quit;  }
 void frame_tick(frame_t *self) {
     igraph_t *g = self->graph;
 
+    /* Reset cursor each tick — widgets opt into NS_RESIZE / EW_RESIZE / etc.
+       only while actively hovered. */
+    g->set_cursor(g->self, CURSOR_DEFAULT);
+
     /* ── poll input and synthesise events ──────────────────────── */
     vec2_t   mp   = g->mouse_position(g->self);
     unsigned mods = current_mods(g);

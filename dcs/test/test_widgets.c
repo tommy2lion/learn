@@ -9,6 +9,9 @@
 #include "../src/framework/widgets/panel.h"
 #include "../src/framework/widgets/button.h"
 #include "../src/framework/widgets/label.h"
+#include "../src/framework/widgets/splitter.h"
+#include "../src/framework/widgets/canvas_widget.h"
+#include "../src/framework/widgets/menu.h"
 #include "../src/framework/core/focus_manager.h"
 #include "../src/framework/core/quit_manager.h"
 #include <stdio.h>
@@ -35,6 +38,10 @@ static const widget_vt_t SPY_VT = { .on_focus = spy_on_focus, .on_blur = spy_on_
 /* mock igraph that returns "should_close = 0" — sufficient for quit_manager test */
 static int  mock_should_close(void *self)               { (void)self; return 0; }
 static int  mock_key_pressed (void *self, igraph_key_t k){ (void)self; (void)k; return 0; }
+
+/* menu on_select stub */
+static int g_picked = -1;
+static void picked_callback(int idx, void *user) { (void)user; g_picked = idx; }
 
 int main(void) {
     printf("=== widget framework offline tests ===\n");
@@ -126,6 +133,80 @@ int main(void) {
         check("quit clean: not yet quitting", quit_manager_should_quit(&qm, &mock_g) == 0);
         quit_manager_request(&qm);
         check("quit after request",           quit_manager_should_quit(&qm, &mock_g) == 1);
+    }
+
+    /* ── splitter children + size accessors + min clamping ────── */
+    {
+        splitter_t *s = splitter_create((rect_t){0, 0, 400, 300}, /*vertical=*/1, 100);
+        button_t   *t = button_create((rect_t){0,0,1,1}, "top",    NULL, NULL);
+        label_t    *b = label_create ((rect_t){0,0,1,1}, "bottom", 14, 0xFF);
+        splitter_set_children(s, &t->base, &b->base);
+        check("splitter has 2 children",         widget_child_count(&s->base) == 2);
+        check("splitter first_size==100",        splitter_get_first_size(s) == 100);
+        splitter_set_min_sizes(s, 50, 50);
+        splitter_set_first_size(s, 10);
+        /* clamp happens during draw/layout — nothing exercised it yet, so just
+           ensure the setter stored the raw value. */
+        check("splitter set_first_size raw",     splitter_get_first_size(s) == 10);
+        widget_destroy(&s->base);  /* should free top + bottom + s */
+    }
+
+    /* ── canvas_widget camera math ────────────────────────────── */
+    {
+        canvas_widget_t *c = canvas_widget_create((rect_t){50, 80, 200, 150}, NULL, NULL);
+        /* default: target (0,0), offset = (50,80), zoom 1 → world == screen-offset */
+        vec2_t w = canvas_widget_screen_to_world(c, (vec2_t){75, 90});
+        check("default cam screen->world", w.x == 25.0f && w.y == 10.0f);
+        vec2_t s2 = canvas_widget_world_to_screen(c, (vec2_t){25, 10});
+        check("default cam world->screen", s2.x == 75.0f && s2.y == 90.0f);
+        /* zoom 2.0, target (100,200) */
+        canvas_widget_set_camera(c, (vec2_t){100, 200}, 2.0f);
+        s2 = canvas_widget_world_to_screen(c, (vec2_t){100, 200});
+        check("zoomed cam: target maps to offset", s2.x == 50.0f && s2.y == 80.0f);
+        widget_destroy(&c->base);
+    }
+
+    /* ── menu open / select / close via synthetic events ──────── */
+    {
+        g_picked = -1;
+        menu_t *m = menu_create((rect_t){10, 10, 80, 24}, "File");
+        menu_add_item(m, "New",  "Ctrl+N");
+        menu_add_item(m, "Open", "Ctrl+O");
+        menu_add_item(m, "Save", "Ctrl+S");
+        check("menu item_count==3",      m->item_count == 3);
+        check("menu starts closed",      m->open == 0);
+
+        /* parent ref so menu_set_open knows the expanded bounds */
+        widget_t fake_parent = { .bounds = {0, 0, 800, 600}, .visible = 1 };
+        m->base.parent = &fake_parent;
+
+        menu_set_on_select(m, picked_callback, NULL);
+
+        /* click trigger → opens */
+        event_t pr_trig = { .kind = EV_MOUSE_PRESS };
+        pr_trig.mouse.pos = (vec2_t){50, 22}; pr_trig.mouse.btn = IM_LEFT;
+        widget_handle_event(&m->base, &pr_trig);
+        check("menu opens after trigger click", m->open == 1);
+
+        /* click 2nd item (idx=1).  Dropdown starts at y = 10+24 = 34, item_h=26 →
+           item 1 covers y=60..86. */
+        event_t pr_item = { .kind = EV_MOUSE_PRESS };
+        pr_item.mouse.pos = (vec2_t){30, 70};
+        pr_item.mouse.btn = IM_LEFT;
+        widget_handle_event(&m->base, &pr_item);
+        check("menu fired callback with idx=1", g_picked == 1);
+        check("menu closed after select",       m->open == 0);
+
+        /* re-open and close via a click far outside the dropdown */
+        widget_handle_event(&m->base, &pr_trig);
+        check("menu re-opens",                  m->open == 1);
+        event_t pr_outside = { .kind = EV_MOUSE_PRESS };
+        pr_outside.mouse.pos = (vec2_t){700, 500};
+        pr_outside.mouse.btn = IM_LEFT;
+        widget_handle_event(&m->base, &pr_outside);
+        check("click outside closes menu",      m->open == 0);
+
+        widget_destroy(&m->base);
     }
 
     printf("\n%d / %d passed\n", total - failures, total);

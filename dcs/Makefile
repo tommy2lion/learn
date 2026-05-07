@@ -22,13 +22,16 @@ FW_GRAPH_HDR = src/framework/graphics/igraph.h \
                src/framework/core/color.h \
                src/framework/core/rect.h
 
-# ── Phase 2.3 (part 1) sources ─────────────────────────────────────
+# ── Phase 2.3 sources ──────────────────────────────────────────────
 FW_WIDGET_SRC = src/framework/core/focus_manager.c \
                 src/framework/core/quit_manager.c \
                 src/framework/widgets/frame.c \
                 src/framework/widgets/panel.c \
                 src/framework/widgets/button.c \
-                src/framework/widgets/label.c
+                src/framework/widgets/label.c \
+                src/framework/widgets/splitter.c \
+                src/framework/widgets/canvas_widget.c \
+                src/framework/widgets/menu.c
 FW_WIDGET_HDR = src/framework/core/focus_manager.h \
                 src/framework/core/quit_manager.h \
                 src/framework/core/message.h \
@@ -36,7 +39,10 @@ FW_WIDGET_HDR = src/framework/core/focus_manager.h \
                 src/framework/widgets/frame.h \
                 src/framework/widgets/panel.h \
                 src/framework/widgets/button.h \
-                src/framework/widgets/label.h
+                src/framework/widgets/label.h \
+                src/framework/widgets/splitter.h \
+                src/framework/widgets/canvas_widget.h \
+                src/framework/widgets/menu.h
 
 # ── Phase 2.1: iplatform unit tests ────────────────────────────────
 TEST_IPLATFORM_SRC = test/test_iplatform.c
@@ -69,21 +75,30 @@ $(TEST_WIDGETS_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) $(TEST_WI
 test_widgets: $(TEST_WIDGETS_EXE)
 	./$(TEST_WIDGETS_EXE)
 
-# Windowed end-to-end demo. Run manually: `make demo` then close the window.
-DEMO_SRC = demo/framework_demo.c
-DEMO_EXE = demo/framework_demo.exe
+# Windowed end-to-end demos. Run manually: `make demos` then launch.
+DEMO1_SRC = demo/framework_demo.c
+DEMO1_EXE = demo/framework_demo.exe
+DEMO2_SRC = demo/widget_showcase.c
+DEMO2_EXE = demo/widget_showcase.exe
 
-$(DEMO_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO_SRC) \
-             $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR)
+$(DEMO1_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO1_SRC) \
+              $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
-		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO_SRC) \
+		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO1_SRC) \
 		-o $@ -lcomdlg32 $(RAYLIB_LDFL)
 
-demo: $(DEMO_EXE)
+$(DEMO2_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO2_SRC) \
+              $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(DEMO2_SRC) \
+		-o $@ -lcomdlg32 $(RAYLIB_LDFL)
 
-# ── future phases (2.3 part 2 widgets, 2.4 domain, ...) ───────────
+demo:  $(DEMO1_EXE)
+demos: $(DEMO1_EXE) $(DEMO2_EXE)
 
-.PHONY: test test_iplatform test_igraph test_widgets demo clean
+# ── future phases (2.4 domain, ...) ────────────────────────────────
+
+.PHONY: test test_iplatform test_igraph test_widgets demo demos clean
 
 test: test_iplatform test_igraph test_widgets
 
