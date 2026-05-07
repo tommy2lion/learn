@@ -181,6 +181,10 @@ input_panel_t *input_panel_create(rect_t bounds, const circuit_t *c) {
     return p;
 }
 
+void input_panel_set_circuit(input_panel_t *self, const circuit_t *c) {
+    self->circuit = c;
+}
+
 void input_panel_set_run_cb(input_panel_t *self, ip_run_fn_t cb, void *user) {
     self->on_run   = cb;
     self->run_user = user;

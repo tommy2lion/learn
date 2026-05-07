@@ -15,11 +15,11 @@
 #define MAX_INPUT_SPECS 16
 #define MAX_STEPS       64
 
-typedef struct {
+typedef struct tagt_input_spec {
     char     name[DOMAIN_NAME_LEN];
     signal_t values[MAX_STEPS];
     int      value_count;
-} InputSpec;
+} input_spec_t;
 
 /* ── helpers ──────────────────────────────────────────────────────── */
 
@@ -38,7 +38,7 @@ static void str_trim(char *s) {
 /* Format A: "name=v,v,v" → 1 spec, value_count=N
    Format B: "n1=v,n2=v"  → N specs, each value_count=1
    Detection: every comma-token contains '=' → B; only first → A. */
-static int parse_input_arg(const char *arg, InputSpec *specs, int *spec_count, int max_specs) {
+static int parse_input_arg(const char *arg, input_spec_t *specs, int *spec_count, int max_specs) {
     char buf[512];
     snprintf(buf, sizeof(buf), "%s", arg);
 
@@ -66,7 +66,7 @@ static int parse_input_arg(const char *arg, InputSpec *specs, int *spec_count, i
             char *name = toks[i]; str_trim(name);
             char *val  = eq + 1;  str_trim(val);
             if (!*name || !*val) return -1;
-            InputSpec *sp = &specs[(*spec_count)++];
+            input_spec_t *sp = &specs[(*spec_count)++];
             snprintf(sp->name, DOMAIN_NAME_LEN, "%.*s", DOMAIN_NAME_LEN - 1, name);
             sp->values[0]   = (signal_t)atoi(val);
             sp->value_count = 1;
@@ -79,7 +79,7 @@ static int parse_input_arg(const char *arg, InputSpec *specs, int *spec_count, i
         char *name = toks[0]; str_trim(name);
         char *first = eq + 1; str_trim(first);
         if (!*name || !*first) return -1;
-        InputSpec *sp = &specs[(*spec_count)++];
+        input_spec_t *sp = &specs[(*spec_count)++];
         snprintf(sp->name, DOMAIN_NAME_LEN, "%.*s", DOMAIN_NAME_LEN - 1, name);
         sp->values[0]   = (signal_t)atoi(first);
         sp->value_count = 1;
@@ -91,7 +91,7 @@ static int parse_input_arg(const char *arg, InputSpec *specs, int *spec_count, i
     return 0;
 }
 
-static const InputSpec *find_spec(const InputSpec *specs, int n, const char *name) {
+static const input_spec_t *find_spec(const input_spec_t *specs, int n, const char *name) {
     for (int i = 0; i < n; i++)
         if (strcmp(specs[i].name, name) == 0) return &specs[i];
     return NULL;
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     iplatform_t *p = platform_create();
     if (!p) { fprintf(stderr, "error: platform unavailable\n"); return 1; }
 
-    InputSpec specs[MAX_INPUT_SPECS];
+    input_spec_t specs[MAX_INPUT_SPECS];
     int       spec_count = 0;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--input") == 0) {
@@ -150,7 +150,7 @@ int main(int argc, char **argv) {
 
     if (steps == 1) {
         for (int i = 0; i < c->input_count; i++) {
-            const InputSpec *sp = find_spec(specs, spec_count, c->input_names[i]);
+            const input_spec_t *sp = find_spec(specs, spec_count, c->input_names[i]);
             signal_t v = sp ? sp->values[0] : SIG_UNDEF;
             circuit_set_input(c, c->input_names[i], v);
             printf("%s%s=%c", i == 0 ? "" : " ", c->input_names[i], sig_char(v));
@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
 
         for (int s = 0; s < steps; s++) {
             for (int i = 0; i < c->input_count; i++) {
-                const InputSpec *sp = find_spec(specs, spec_count, c->input_names[i]);
+                const input_spec_t *sp = find_spec(specs, spec_count, c->input_names[i]);
                 signal_t v = SIG_UNDEF;
                 if (sp) {
                     int idx = s < sp->value_count ? s : sp->value_count - 1;

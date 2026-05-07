@@ -39,7 +39,9 @@ class tagt_menu {
 typedef class tagt_menu menu_t;
 
 menu_t *menu_create(rect_t trigger_rect, const char *label);
-void    menu_add_item(menu_t *self, const char *label, const char *shortcut);
+/* Returns the index of the newly-added item, or -1 if the menu is full
+   (MENU_MAX_ITEMS reached). */
+int     menu_add_item(menu_t *self, const char *label, const char *shortcut);
 void    menu_set_on_select(menu_t *self, menu_on_select_t cb, void *user);
 
 #endif /* DCS_FW_MENU_H */

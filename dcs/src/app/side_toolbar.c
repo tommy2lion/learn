@@ -10,7 +10,7 @@
 #define BTN_H         40
 #define BTN_FONT      15
 
-typedef struct { float y; const char *label; place_kind_t kind; } stb_item_t;
+typedef struct tagt_stb_item { float y; const char *label; place_kind_t kind; } stb_item_t;
 
 static const stb_item_t ITEMS[] = {
     {  60, "AND",      PLACE_AND    },

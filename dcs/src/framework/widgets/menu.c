@@ -148,11 +148,13 @@ menu_t *menu_create(rect_t trigger_rect, const char *label) {
     return m;
 }
 
-void menu_add_item(menu_t *self, const char *label, const char *shortcut) {
-    if (self->item_count >= MENU_MAX_ITEMS) return;
-    menu_item_t *it = &self->items[self->item_count++];
+int menu_add_item(menu_t *self, const char *label, const char *shortcut) {
+    if (self->item_count >= MENU_MAX_ITEMS) return -1;
+    int idx = self->item_count++;
+    menu_item_t *it = &self->items[idx];
     snprintf(it->label,    sizeof(it->label),    "%s", label    ? label    : "");
     snprintf(it->shortcut, sizeof(it->shortcut), "%s", shortcut ? shortcut : "");
+    return idx;
 }
 
 void menu_set_on_select(menu_t *self, menu_on_select_t cb, void *user) {

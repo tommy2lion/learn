@@ -42,19 +42,8 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
     if (app->circuit) circuit_destroy(app->circuit);
     app->circuit = c;
     circuit_canvas_widget_set_circuit(app->circuit_canvas, c);
-    /* input_panel and timing_canvas keep raw pointers; just update them */
-    /* (input_panel_t.circuit is the only field, which we already set in create —
-       but here it points to the OLD circuit. Reseat by recreating? Simpler:
-       expose a setter on input_panel.) */
-    /* For now, the input_panel was created with the original circuit pointer.
-       We need a quick setter — just patch the field directly via casting since
-       we haven't exposed one. */
-    /* (input_panel.h doesn't expose set_circuit; do it by struct knowledge.) */
-    {
-        /* Direct field access — header-internal coupling is acceptable here. */
-        const circuit_t **slot = (const circuit_t **)&((input_panel_t *)app->input_panel)->circuit;
-        *slot = c;
-    }
+    /* Reseat the input_panel's circuit reference via its public setter. */
+    input_panel_set_circuit(app->input_panel, c);
     snprintf(app->file_path, sizeof(app->file_path), "%s", path);
     app->path_is_explicit = 1;
     set_status(app, "Opened %s", path);
@@ -64,10 +53,7 @@ static void action_new(dcs_app_t *app) {
     if (app->circuit) { circuit_destroy(app->circuit); app->circuit = NULL; }
     app->circuit = circuit_create();
     circuit_canvas_widget_set_circuit(app->circuit_canvas, app->circuit);
-    {
-        const circuit_t **slot = (const circuit_t **)&((input_panel_t *)app->input_panel)->circuit;
-        *slot = app->circuit;
-    }
+    input_panel_set_circuit(app->input_panel, app->circuit);
     snprintf(app->file_path, sizeof(app->file_path), "untitled.dcs");
     app->path_is_explicit = 0;
     /* clear simulation results */
@@ -130,7 +116,7 @@ static void on_menu_select(int idx, void *user) {
 
 /* ── run / sweep ─────────────────────────────────────────────────── */
 
-typedef struct { dcs_app_t *app; int sweep; } stim_ctx_t;
+typedef struct tagt_stim_ctx { dcs_app_t *app; int sweep; } stim_ctx_t;
 
 static signal_t stim_callback(int step, int input_idx, void *user) {
     stim_ctx_t *sc = (stim_ctx_t *)user;

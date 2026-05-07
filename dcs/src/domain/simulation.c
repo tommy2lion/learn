@@ -15,11 +15,25 @@ void simulation_run(simulation_t *self, int steps,
     circuit_t *c = self->circuit;
     if (!c || steps <= 0) return;
 
-    /* Reset and prepare tracks: inputs first, then outputs. */
+    /* Reset and prepare tracks: inputs first, then outputs. If any
+       allocation fails, abort and leave waves cleared so the caller
+       sees zero tracks rather than a partial / mismatched index space. */
     waveform_release(&self->waves);
     waveform_init(&self->waves, steps);
-    for (int i = 0; i < c->input_count; i++)  waveform_add_track(&self->waves, c->input_names[i]);
-    for (int i = 0; i < c->output_count; i++) waveform_add_track(&self->waves, c->output_names[i]);
+    for (int i = 0; i < c->input_count; i++) {
+        if (waveform_add_track(&self->waves, c->input_names[i]) < 0) {
+            waveform_release(&self->waves);
+            waveform_init(&self->waves, 0);
+            return;
+        }
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        if (waveform_add_track(&self->waves, c->output_names[i]) < 0) {
+            waveform_release(&self->waves);
+            waveform_init(&self->waves, 0);
+            return;
+        }
+    }
 
     for (int s = 0; s < steps; s++) {
         for (int i = 0; i < c->input_count; i++) {

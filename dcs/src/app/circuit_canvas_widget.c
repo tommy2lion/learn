@@ -85,6 +85,7 @@ static void auto_layout(circuit_t *c) {
         if (c->output_positions[i].x != 0 || c->output_positions[i].y != 0) return;
 
     int *depths = (int *)malloc(sizeof(int) * (c->component_count > 0 ? c->component_count : 1));
+    if (!depths) return;       /* OOM — leave positions at zero; caller can press F to refit */
     for (int i = 0; i < c->component_count; i++) depths[i] = -1;
 
     int max_depth = 0;
@@ -97,6 +98,10 @@ static void auto_layout(circuit_t *c) {
 
     int *col_total = (int *)calloc(total_cols, sizeof(int));
     int *col_idx   = (int *)calloc(total_cols, sizeof(int));
+    if (!col_total || !col_idx) {
+        free(depths); free(col_total); free(col_idx);
+        return;                /* OOM */
+    }
     col_total[0] = c->input_count;
     for (int i = 0; i < c->component_count; i++) col_total[depths[i] >= 1 ? depths[i] : 1]++;
     col_total[output_col] += c->output_count;
@@ -297,10 +302,14 @@ static int name_in_use(const circuit_t *c, const char *name) {
 }
 
 static void next_name(circuit_canvas_widget_t *cw, const char *prefix, int *counter, char *out, int max) {
-    for (;;) {
+    /* Bounded retry — if we somehow exhaust ~10000 candidates with the
+       given prefix, fall back to a counter-based name and accept whatever
+       collision the user sees. Practically this is never reached. */
+    for (int tries = 0; tries < 10000; tries++) {
         snprintf(out, max, "%s%d", prefix, ++(*counter));
         if (!name_in_use(cw->circuit, out)) return;
     }
+    snprintf(out, max, "%s_x%d", prefix, *counter);
 }
 
 static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
@@ -383,9 +392,12 @@ static void connect_wire(circuit_canvas_widget_t *cw, node_ref_t src, node_ref_t
 /* Find a wire entry whose dst is component[dst_idx], pin `pin`. (Editor wires
    are implicit — given by component's in_wires[pin] non-empty value pointing
    to some producer.) Returns the producer node and pin, or NONE. */
-static node_ref_t wire_at(const circuit_canvas_widget_t *cw, vec2_t world) {
-    /* iterate every connection (component input pins + output destinations) and
-       test the line from producer's out pin to consumer's in pin */
+/* If `world` is near a drawn wire, return the consumer end as a node_ref:
+   - NODE_COMPONENT with `*pin_out` set to the input-pin index that the wire feeds
+   - NODE_OUTPUT for an external-output sink (pin_out is set to 0)
+   Returns NODE_REF_NONE if no wire is near. */
+static node_ref_t wire_at(const circuit_canvas_widget_t *cw, vec2_t world, int *pin_out) {
+    if (pin_out) *pin_out = 0;
     /* component inputs */
     for (int i = 0; i < cw->circuit->component_count; i++) {
         component_t *c = cw->circuit->components[i];
@@ -405,8 +417,8 @@ static node_ref_t wire_at(const circuit_canvas_widget_t *cw, vec2_t world) {
             float px = a.x + t * dx, py = a.y + t * dy;
             float ddx = world.x - px, ddy = world.y - py;
             if (ddx * ddx + ddy * ddy <= WIRE_HIT * WIRE_HIT) {
-                /* return the consumer end so deletion clears the right pin */
-                return (node_ref_t){NODE_COMPONENT, (i << 8) | (p & 0xFF)};
+                if (pin_out) *pin_out = p;
+                return (node_ref_t){NODE_COMPONENT, i};
             }
         }
     }
@@ -823,13 +835,11 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             cw->hover_node = NODE_REF_NONE;
             return 1;
         }
-        node_ref_t w = wire_at(cw, world);
+        int wire_pin = 0;
+        node_ref_t w = wire_at(cw, world, &wire_pin);
         if (w.kind != NODE_NONE) {
-            /* the hit's index encodes (comp_idx<<8) | pin for component dest, or output index for output dest */
             if (w.kind == NODE_COMPONENT) {
-                int comp_idx = w.index >> 8;
-                int pin      = w.index & 0xFF;
-                disconnect_input(cw, comp_idx, pin);
+                disconnect_input(cw, w.index, wire_pin);
             } else if (w.kind == NODE_OUTPUT) {
                 cw->circuit->output_names[w.index][0] = '\0';
             }
