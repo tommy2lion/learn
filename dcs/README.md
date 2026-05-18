@@ -32,4 +32,16 @@ The development of DCS (Digital Circuit Simulation) — design, review, code rev
 
 ↓
 
+**[docs/step2-supplement-req.md](docs/step2-supplement-req.md)** — Step 2 supplement requirements: orthogonal wire routing, junction dots, click-to-highlight nets, wire-geometry persistence, internal/external display modes.
+
+↓
+
+**[docs/step2-supplement-design.md](docs/step2-supplement-design.md)** — Step 2 supplement design: app-layer `wire_geometry` sidecar, Z-router, `# @wires` file-format extension, external-view render hook with per-pin style enum.
+
+↓
+
+**[docs/step2-supplement-implementation-plan.md](docs/step2-supplement-implementation-plan.md)** — Step 2 supplement implementation plan: 13 phased commits (1–11 required, 12–13 stretch) with goal / touches / steps / tests / done-when per phase.
+
+↓
+
 **[docs/step3-plan.md](docs/step3-plan.md)** — Step 3 plan: nine phases (3.0 hardening through 3.8 design-only analog accommodation), seven open questions awaiting decisions.
