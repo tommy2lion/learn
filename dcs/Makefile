@@ -28,6 +28,7 @@ APP_SRC = src/app/circuit_canvas_widget.c \
           src/app/side_toolbar.c \
           src/app/input_panel.c \
           src/app/divider_widget.c \
+          src/app/wire_geometry.c \
           src/app/dcs_app.c
 APP_HDR = src/app/editor_state.h \
           src/app/circuit_canvas_widget.h \
@@ -35,6 +36,7 @@ APP_HDR = src/app/editor_state.h \
           src/app/side_toolbar.h \
           src/app/input_panel.h \
           src/app/divider_widget.h \
+          src/app/wire_geometry.h \
           src/app/dcs_app.h
 
 GUI_SRC = src/gui/main.c
@@ -171,11 +173,21 @@ $(GUI_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) \
 
 gui: $(GUI_EXE)
 
+# ── Supplement Phase 1: wire_geometry unit tests ───────────────────
+TEST_WIRE_GEOMETRY_SRC = test/test_wire_geometry.c
+TEST_WIRE_GEOMETRY_EXE = test/test_wire_geometry.exe
+
+$(TEST_WIRE_GEOMETRY_EXE): src/app/wire_geometry.c src/app/wire_geometry.h $(TEST_WIRE_GEOMETRY_SRC)
+	$(CC) $(CFLAGS) src/app/wire_geometry.c $(TEST_WIRE_GEOMETRY_SRC) -o $@
+
+test_wire_geometry: $(TEST_WIRE_GEOMETRY_EXE)
+	./$(TEST_WIRE_GEOMETRY_EXE)
+
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
