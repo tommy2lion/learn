@@ -3,5 +3,8 @@ node_modules/
 *.dll
 .claude/
 
+package-lock.json
+package.json
+
 # resume.txt
 resume.txt
