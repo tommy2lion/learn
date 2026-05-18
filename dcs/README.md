@@ -12,24 +12,24 @@ The development of DCS (Digital Circuit Simulation) — design, review, code rev
 
 ↓
 
-**[step2-refactor-plan.md](step2-refactor-plan.md)** — Step 2 refactoring requirements (14 points).
+**[docs/step2-refactor-plan.md](docs/step2-refactor-plan.md)** — Step 2 refactoring requirements (14 points).
 
 ↓
 
-**[step2-refactor-design.md](step2-refactor-design.md)** — Step 2 design proposal: framework + domain + app, phased migration.
+**[docs/step2-refactor-design.md](docs/step2-refactor-design.md)** — Step 2 design proposal: framework + domain + app, phased migration.
 
 ↓
 
-**[step2-review-of-refactor-design.md](step2-review-of-refactor-design.md)** — Review of the design proposal (11 points; integrated back into `step2-refactor-design.md`).
+**[docs/step2-review-of-refactor-design.md](docs/step2-review-of-refactor-design.md)** — Review of the design proposal (11 points; integrated back into `step2-refactor-design.md`).
 
 ↓
 
-**[step2-code-review-req.md](step2-code-review-req.md)** — Code-review request after Step 2 implementation: seven aspects to audit, eight forward-looking requirements to assess.
+**[docs/step2-code-review-req.md](docs/step2-code-review-req.md)** — Code-review request after Step 2 implementation: seven aspects to audit, eight forward-looking requirements to assess.
 
 ↓
 
-**[step2-code-review.md](step2-code-review.md)** — Code-review report: convention, safety, layering, SoC, testability, extensibility verdicts; per-item assessment of the eight forward requirements.
+**[docs/step2-code-review.md](docs/step2-code-review.md)** — Code-review report: convention, safety, layering, SoC, testability, extensibility verdicts; per-item assessment of the eight forward requirements.
 
 ↓
 
-**[step3-plan.md](step3-plan.md)** — Step 3 plan: nine phases (3.0 hardening through 3.8 design-only analog accommodation), seven open questions awaiting decisions.
+**[docs/step3-plan.md](docs/step3-plan.md)** — Step 3 plan: nine phases (3.0 hardening through 3.8 design-only analog accommodation), seven open questions awaiting decisions.
