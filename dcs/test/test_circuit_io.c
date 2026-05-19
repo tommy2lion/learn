@@ -7,6 +7,7 @@
 #include "../src/domain/component.h"
 #include "../src/domain/circuit.h"
 #include "../src/domain/circuit_io.h"
+#include "../src/domain/wire_geometry.h"
 
 static int failures = 0, total = 0;
 
@@ -363,6 +364,191 @@ static void test_load_no_layout_then_save_no_layout(void) {
     circuit_destroy(c);
 }
 
+/* ── supplement Phase 7: # @wires round-trip ─────────────────────── */
+
+static void test_serialize_with_wires(void) {
+    /* Build a tiny circuit: 1 input → 1 NOT → 1 output. */
+    circuit_t *c = circuit_create();
+    circuit_add_input (c, "a");
+    circuit_add_output(c, "y");
+    component_t *n1 = gate_not_create("n1");
+    circuit_add_component(c, n1, "a", NULL);
+    snprintf(c->output_names[0], DOMAIN_NAME_LEN, "n1");
+
+    /* Hand-build a tiny wire geometry: two nets, mix of H and V. */
+    wire_geometry_t g; wire_geometry_init(&g);
+    int a_idx  = wire_geometry_get_or_create(&g, "a");
+    int n1_idx = wire_geometry_get_or_create(&g, "n1");
+    wire_segment_t a_segs[] = {
+        {{100, 50}, {180, 50}},        /* H */
+        {{180, 50}, {180, 80}},        /* V */
+    };
+    wire_segment_t n_segs[] = {
+        {{240, 80}, {300, 80}},        /* H */
+    };
+    wire_geometry_set_segments(&g, a_idx,  a_segs, 2);
+    wire_geometry_set_segments(&g, n1_idx, n_segs, 1);
+
+    char *text = circuit_io_serialize_ex(c, &g);
+    check("serialize_ex: returned non-NULL", text != NULL);
+    if (text) {
+        check("serialize_ex: contains '# @wires'",
+              strstr(text, "\n# @wires\n") != NULL);
+        check("serialize_ex: contains 'net=a'",
+              strstr(text, "# @  net=a\n")  != NULL);
+        check("serialize_ex: contains 'net=n1'",
+              strstr(text, "# @  net=n1\n") != NULL);
+        check("serialize_ex: emits H segment with UTF-8 arrow",
+              strstr(text, "h 100,50 \xe2\x86\x92 180,50") != NULL);
+        check("serialize_ex: emits V segment",
+              strstr(text, "v 180,50 \xe2\x86\x92 180,80") != NULL);
+        free(text);
+    }
+
+    wire_geometry_release(&g);
+    circuit_destroy(c);
+}
+
+static void test_round_trip_with_wires(void) {
+    /* Build the same shape, serialise with geometry, reparse, compare. */
+    circuit_t *c = circuit_create();
+    circuit_add_input (c, "a");
+    circuit_add_output(c, "y");
+    component_t *n1 = gate_not_create("n1");
+    circuit_add_component(c, n1, "a", NULL);
+    snprintf(c->output_names[0], DOMAIN_NAME_LEN, "n1");
+
+    wire_geometry_t g; wire_geometry_init(&g);
+    int a_idx  = wire_geometry_get_or_create(&g, "a");
+    int n1_idx = wire_geometry_get_or_create(&g, "n1");
+    wire_segment_t a_segs[] = {
+        {{100, 50}, {180, 50}},
+        {{180, 50}, {180, 80}},
+    };
+    wire_segment_t n_segs[] = {
+        {{240, 80}, {300, 80}},
+    };
+    wire_geometry_set_segments(&g, a_idx,  a_segs, 2);
+    wire_geometry_set_segments(&g, n1_idx, n_segs, 1);
+
+    char *text = circuit_io_serialize_ex(c, &g);
+    check("round-trip: serialize_ex returned non-NULL", text != NULL);
+
+    /* Re-parse via _ex into a fresh circuit + geometry. */
+    char err[128] = {0};
+    wire_geometry_t g2; wire_geometry_init(&g2);
+    circuit_t *c2 = circuit_io_parse_ex(text, err, sizeof(err), &g2);
+    check("round-trip: parse_ex returned non-NULL", c2 != NULL);
+    free(text);
+
+    if (c2) {
+        check("round-trip: 2 nets restored",  g2.net_count == 2);
+        int rt_a  = wire_geometry_find(&g2, "a");
+        int rt_n1 = wire_geometry_find(&g2, "n1");
+        check("round-trip: net 'a' found",   rt_a  >= 0);
+        check("round-trip: net 'n1' found",  rt_n1 >= 0);
+        const wire_net_geom_t *na = wire_geometry_net(&g2, rt_a);
+        const wire_net_geom_t *nn = wire_geometry_net(&g2, rt_n1);
+        check("round-trip: 'a' has 2 segs",  na && na->seg_count == 2);
+        check("round-trip: 'n1' has 1 seg",  nn && nn->seg_count == 1);
+        check("round-trip: a seg0 endpoints",
+              na && na->segs[0].a.x == 100 && na->segs[0].a.y == 50
+                 && na->segs[0].b.x == 180 && na->segs[0].b.y == 50);
+        check("round-trip: a seg1 endpoints",
+              na && na->segs[1].a.x == 180 && na->segs[1].a.y == 50
+                 && na->segs[1].b.x == 180 && na->segs[1].b.y == 80);
+        check("round-trip: n1 seg0 endpoints",
+              nn && nn->segs[0].a.x == 240 && nn->segs[0].a.y == 80
+                 && nn->segs[0].b.x == 300 && nn->segs[0].b.y == 80);
+        circuit_destroy(c2);
+    }
+    wire_geometry_release(&g);
+    wire_geometry_release(&g2);
+    circuit_destroy(c);
+}
+
+static void test_parse_wires_ascii_arrow(void) {
+    /* ASCII -> arrow alternate; mixed with the UTF-8 → in another net. */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "\n"
+        "y = not(a)\n"
+        "\n"
+        "# @wires\n"
+        "# @  net=a\n"
+        "# @    h 0,0 -> 50,0\n"
+        "# @  net=y\n"
+        "# @    h 60,0 \xe2\x86\x92 100,0\n";
+    char err[128] = {0};
+    wire_geometry_t g; wire_geometry_init(&g);
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g);
+    check("ascii arrow: parse_ex succeeds", c != NULL);
+    check("ascii arrow: net a parsed",     wire_geometry_find(&g, "a") >= 0);
+    check("ascii arrow: net y parsed",     wire_geometry_find(&g, "y") >= 0);
+    int ai = wire_geometry_find(&g, "a");
+    const wire_net_geom_t *na = wire_geometry_net(&g, ai);
+    check("ascii arrow: net a has 1 seg",  na && na->seg_count == 1);
+    wire_geometry_release(&g);
+    if (c) circuit_destroy(c);
+}
+
+static void test_parse_no_wires_block(void) {
+    /* Layout but no wires: parse_ex succeeds, geometry stays empty. */
+    const char *src =
+        "inputs: a, b\n"
+        "outputs: y\n"
+        "\n"
+        "y = and(a, b)\n"
+        "\n"
+        "# @layout\n"
+        "# @  y = 200, 100\n";
+    char err[128] = {0};
+    wire_geometry_t g; wire_geometry_init(&g);
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g);
+    check("no-wires: parse_ex succeeds",         c != NULL);
+    check("no-wires: geometry stays empty",       g.net_count == 0);
+    check("no-wires: layout still parsed",
+          c != NULL && c->components[0]->position.x == 200);
+    wire_geometry_release(&g);
+    if (c) circuit_destroy(c);
+}
+
+static void test_parse_ex_with_null_geom(void) {
+    /* parse_ex with geom_out = NULL — wires block is skipped silently
+       (legacy circuit_io_parse path). */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "\n"
+        "y = not(a)\n"
+        "\n"
+        "# @wires\n"
+        "# @  net=a\n"
+        "# @    h 0,0 -> 50,0\n";
+    char err[128] = {0};
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL);
+    check("parse_ex(geom=NULL): still parses circuit", c != NULL);
+    if (c) circuit_destroy(c);
+}
+
+static void test_legacy_serialize_byte_identical(void) {
+    /* Confirm circuit_io_serialize(c) == circuit_io_serialize_ex(c, NULL). */
+    circuit_t *c = circuit_create();
+    circuit_add_input(c, "a");
+    circuit_add_output(c, "y");
+    component_t *n1 = gate_not_create("n1");
+    circuit_add_component(c, n1, "a", NULL);
+    snprintf(c->output_names[0], DOMAIN_NAME_LEN, "n1");
+    char *legacy = circuit_io_serialize(c);
+    char *ex_null = circuit_io_serialize_ex(c, NULL);
+    check("legacy serialize == _ex(c, NULL)",
+          legacy && ex_null && strcmp(legacy, ex_null) == 0);
+    free(legacy);
+    free(ex_null);
+    circuit_destroy(c);
+}
+
 int main(void) {
     printf("=== domain: circuit_io tests ===\n");
     test_parse_and_gate();
@@ -380,6 +566,13 @@ int main(void) {
     test_no_layout_when_zero_positions();
     test_round_trip_with_positions();
     test_load_no_layout_then_save_no_layout();
+    /* Supplement Phase 7 */
+    test_serialize_with_wires();
+    test_round_trip_with_wires();
+    test_parse_wires_ascii_arrow();
+    test_parse_no_wires_block();
+    test_parse_ex_with_null_geom();
+    test_legacy_serialize_byte_identical();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

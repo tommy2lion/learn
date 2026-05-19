@@ -1197,6 +1197,16 @@ void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
     snprintf(self->highlighted_net, DOMAIN_NAME_LEN, "%s", wire_name);
 }
 
+const wire_geometry_t *circuit_canvas_widget_geometry(const circuit_canvas_widget_t *self) {
+    return &self->wires;
+}
+
+void circuit_canvas_widget_load_geometry(circuit_canvas_widget_t *self,
+                                         wire_geometry_t *src) {
+    wire_geometry_move(&self->wires, src);
+    assert_geometry_consistent(self);
+}
+
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->mode = CMODE_IDLE;
     self->place_kind = PLACE_NONE;

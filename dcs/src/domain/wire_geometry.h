@@ -14,7 +14,7 @@
 
 #include "../framework/core/oo.h"
 #include "../framework/core/rect.h"     /* vec2_t */
-#include "../domain/component.h"         /* DOMAIN_NAME_LEN */
+#include "component.h"                   /* DOMAIN_NAME_LEN */
 
 class tagt_wire_segment {
     vec2_t a, b;                          /* one of (a.x == b.x) or (a.y == b.y) */
@@ -53,6 +53,18 @@ int wire_geometry_get_or_create(wire_geometry_t *self, const char *wire_name);
    Returns 0 on success, -1 on error. */
 int wire_geometry_set_segments(wire_geometry_t *self, int net_idx,
                                const wire_segment_t *segs, int count);
+
+/* Append (do not replace) validated segments to the net at net_idx. Same
+   H/V invariant as set_segments. count == 0 is a successful no-op.
+   Returns 0 on success, -1 on error (existing segments unchanged). */
+int wire_geometry_append_segments(wire_geometry_t *self, int net_idx,
+                                  const wire_segment_t *segs, int count);
+
+/* Transfer every net from src to dst. Frees dst's previous contents first;
+   afterward `src` is left in the state of a freshly init'd wire_geometry_t
+   (no allocated storage). Safe to call wire_geometry_release on either
+   side after the move. */
+void wire_geometry_move(wire_geometry_t *dst, wire_geometry_t *src);
 
 /* Read-only access. Returns NULL if idx is out of range. */
 const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx);

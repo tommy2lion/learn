@@ -28,7 +28,6 @@ APP_SRC = src/app/circuit_canvas_widget.c \
           src/app/side_toolbar.c \
           src/app/input_panel.c \
           src/app/divider_widget.c \
-          src/app/wire_geometry.c \
           src/app/dcs_app.c
 APP_HDR = src/app/editor_state.h \
           src/app/circuit_canvas_widget.h \
@@ -36,7 +35,6 @@ APP_HDR = src/app/editor_state.h \
           src/app/side_toolbar.h \
           src/app/input_panel.h \
           src/app/divider_widget.h \
-          src/app/wire_geometry.h \
           src/app/dcs_app.h
 
 GUI_SRC = src/gui/main.c
@@ -49,12 +47,14 @@ DOMAIN_SRC = src/domain/gate_and.c \
              src/domain/circuit.c \
              src/domain/circuit_io.c \
              src/domain/waveform.c \
-             src/domain/simulation.c
+             src/domain/simulation.c \
+             src/domain/wire_geometry.c
 DOMAIN_HDR = src/domain/component.h \
              src/domain/circuit.h \
              src/domain/circuit_io.h \
              src/domain/waveform.h \
-             src/domain/simulation.h
+             src/domain/simulation.h \
+             src/domain/wire_geometry.h
 
 # ── Phase 2.3 sources ──────────────────────────────────────────────
 FW_WIDGET_SRC = src/framework/core/focus_manager.c \
@@ -177,8 +177,8 @@ gui: $(GUI_EXE)
 TEST_WIRE_GEOMETRY_SRC = test/test_wire_geometry.c
 TEST_WIRE_GEOMETRY_EXE = test/test_wire_geometry.exe
 
-$(TEST_WIRE_GEOMETRY_EXE): src/app/wire_geometry.c src/app/wire_geometry.h $(TEST_WIRE_GEOMETRY_SRC)
-	$(CC) $(CFLAGS) src/app/wire_geometry.c $(TEST_WIRE_GEOMETRY_SRC) -o $@
+$(TEST_WIRE_GEOMETRY_EXE): src/domain/wire_geometry.c src/domain/wire_geometry.h $(TEST_WIRE_GEOMETRY_SRC)
+	$(CC) $(CFLAGS) src/domain/wire_geometry.c $(TEST_WIRE_GEOMETRY_SRC) -o $@
 
 test_wire_geometry: $(TEST_WIRE_GEOMETRY_EXE)
 	./$(TEST_WIRE_GEOMETRY_EXE)
@@ -189,13 +189,12 @@ TEST_CCW_SUP_EXE = test/test_circuit_canvas_supplement.exe
 
 $(TEST_CCW_SUP_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
                      $(DOMAIN_SRC) $(DOMAIN_HDR) \
-                     src/app/wire_geometry.c src/app/wire_geometry.h \
                      src/app/circuit_canvas_widget.c src/app/circuit_canvas_widget.h \
                      src/app/editor_state.h \
                      $(TEST_CCW_SUP_SRC)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
 		$(FW_WIDGET_SRC) $(DOMAIN_SRC) \
-		src/app/wire_geometry.c src/app/circuit_canvas_widget.c \
+		src/app/circuit_canvas_widget.c \
 		$(TEST_CCW_SUP_SRC) -o $@
 
 test_circuit_canvas_supplement: $(TEST_CCW_SUP_EXE)

@@ -4,7 +4,7 @@
  * set_segments H/V invariant + atomicity on rejection, capacity growth.
  * No raylib, no Win32 — pure data-structure exercise. */
 
-#include "../src/app/wire_geometry.h"
+#include "../src/domain/wire_geometry.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -715,6 +715,72 @@ int main(void) {
     }
 
     #undef MAKE_ONE_NET
+
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 7 — append_segments + move (public API)
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── append: adds to existing list, validates H/V invariant ────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "a");
+        wire_segment_t s1[] = { seg(0, 0, 10, 0) };
+        check("set_segments seeds",
+              wire_geometry_set_segments(&g, idx, s1, 1) == 0);
+        wire_segment_t s2[] = { seg(10, 0, 10, 50) };
+        check("append H+V seg",
+              wire_geometry_append_segments(&g, idx, s2, 1) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("appended: seg_count == 2", n && n->seg_count == 2);
+
+        wire_segment_t bad[] = { seg(0, 0, 10, 20) };   /* diagonal */
+        check("append rejects diagonal",
+              wire_geometry_append_segments(&g, idx, bad, 1) == -1);
+        check("rejected: seg_count unchanged",
+              n && n->seg_count == 2);
+
+        check("append count==0 returns 0 (no-op)",
+              wire_geometry_append_segments(&g, idx, NULL, 0) == 0);
+        check("append negative count returns -1",
+              wire_geometry_append_segments(&g, idx, s2, -1) == -1);
+        check("append bad idx returns -1",
+              wire_geometry_append_segments(&g, 99, s2, 1) == -1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── move: transfers ownership; src becomes empty ──────────────── */
+    {
+        wire_geometry_t src; wire_geometry_init(&src);
+        wire_geometry_get_or_create(&src, "x");
+        wire_geometry_get_or_create(&src, "y");
+        wire_segment_t s[] = { seg(0, 0, 10, 0) };
+        wire_geometry_set_segments(&src, 0, s, 1);
+        wire_geometry_set_segments(&src, 1, s, 1);
+
+        wire_geometry_t dst; wire_geometry_init(&dst);
+        wire_geometry_get_or_create(&dst, "stale");   /* will be freed by move */
+
+        wire_geometry_move(&dst, &src);
+        check("move: dst now has 2 nets",         dst.net_count == 2);
+        check("move: dst has 'x'",                wire_geometry_find(&dst, "x") >= 0);
+        check("move: dst has 'y'",                wire_geometry_find(&dst, "y") >= 0);
+        check("move: dst lost 'stale' (released)", wire_geometry_find(&dst, "stale") == -1);
+        check("move: src is empty",                src.net_count == 0);
+        check("move: src nets pointer NULL",       src.nets == NULL);
+
+        /* Release on src after move is a safe no-op. */
+        wire_geometry_release(&src);
+        wire_geometry_release(&dst);
+    }
+
+    /* ── move: self-move is a no-op ────────────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        wire_geometry_get_or_create(&g, "x");
+        wire_geometry_move(&g, &g);
+        check("self-move: net retained", g.net_count == 1);
+        wire_geometry_release(&g);
+    }
 
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;

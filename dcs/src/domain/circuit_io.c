@@ -110,6 +110,59 @@ static circuit_t *fail(circuit_t *c, char *err_out, int err_len,
     return NULL;
 }
 
+/* Parse one wires-block entry. Two forms are accepted:
+     "net=<wire_name>"             — switch to a new (or existing) net.
+     "h x1,y1 → x2,y2"            — append H segment to the current net.
+     "v x1,y1 → x2,y2"            — append V segment to the current net.
+   The arrow may also be written "->" (both are accepted; serializer emits →).
+   `body` is the text after "# @" with leading whitespace; both "  net=..."
+   and "    h ..." are valid. Unknown sub-formats are silently ignored
+   (forward-compatible). */
+static void parse_wires_entry(wire_geometry_t *geom, const char *body,
+                              int *current_net_idx) {
+    char buf[MAX_LINE];
+    snprintf(buf, sizeof(buf), "%s", body);
+    str_trim(buf);
+    if (!buf[0]) return;
+
+    /* "net=<name>" — start a new net (or re-select an existing one). */
+    if (strncmp(buf, "net=", 4) == 0) {
+        char name[DOMAIN_NAME_LEN];
+        /* Bound the source explicitly so gcc doesn't flag a possible truncation
+           (snprintf already truncates safely — but %.*s makes the bound visible). */
+        snprintf(name, sizeof(name), "%.*s",
+                 (int)(sizeof(name) - 1), buf + 4);
+        str_trim(name);
+        if (!name[0]) { *current_net_idx = -1; return; }
+        *current_net_idx = wire_geometry_get_or_create(geom, name);
+        return;
+    }
+
+    /* "h x1,y1 → x2,y2" / "v ..." — append one segment to the current net. */
+    if ((buf[0] == 'h' || buf[0] == 'v')
+        && (buf[1] == ' ' || buf[1] == '\t')) {
+        if (*current_net_idx < 0) return;
+        char dir = buf[0];
+        float x1, y1, x2, y2;
+        char arrow[8] = {0};
+        const char *p = buf + 1;
+        while (isspace((unsigned char)*p)) p++;
+        int n = sscanf(p, "%f , %f %4s %f , %f",
+                       &x1, &y1, arrow, &x2, &y2);
+        if (n != 5) return;
+        if (strcmp(arrow, "\xe2\x86\x92") != 0   /* UTF-8 → */
+         && strcmp(arrow, "->") != 0) return;
+        if (dir == 'h' && y1 != y2) return;
+        if (dir == 'v' && x1 != x2) return;
+        wire_segment_t seg;
+        seg.a.x = x1; seg.a.y = y1;
+        seg.b.x = x2; seg.b.y = y2;
+        wire_geometry_append_segments(geom, *current_net_idx, &seg, 1);
+        return;
+    }
+    /* unknown form: ignored */
+}
+
 /* Parse one layout-block entry: "  name = x, y" (already stripped of "# @").
    Looks the name up in components / inputs / outputs and writes the position.
    Unknown names are silently ignored (forward-compatible). */
@@ -159,6 +212,11 @@ static void parse_layout_entry(circuit_t *c, const char *body) {
 /* ── public: parse ───────────────────────────────────────────────── */
 
 circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
+    return circuit_io_parse_ex(text, err_out, err_len, NULL);
+}
+
+circuit_t *circuit_io_parse_ex(const char *text, char *err_out, int err_len,
+                               wire_geometry_t *geom_out) {
     if (err_out && err_len > 0) err_out[0] = '\0';
 
     circuit_t *c = circuit_create();
@@ -167,11 +225,13 @@ circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
     int pos = 0, lineno = 0;
     int saw_inputs = 0, saw_outputs = 0;
     int in_layout = 0;                       /* set after `# @layout` until blank/structural line */
+    int in_wires  = 0;                       /* set after `# @wires`  until blank/structural line */
+    int wires_current_net = -1;               /* index in geom_out of the active net */
     char line[MAX_LINE];
 
     while (next_line(text, &pos, line, MAX_LINE) == 0) {
         lineno++;
-        if (!line[0]) { in_layout = 0; continue; }
+        if (!line[0]) { in_layout = 0; in_wires = 0; continue; }
 
         /* ── annotation / comment lines ──────────────────────────── */
         if (line[0] == '#') {
@@ -179,11 +239,26 @@ circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
             if (strncmp(line, "# @layout", 9) == 0
                 && (line[9] == '\0' || isspace((unsigned char)line[9]))) {
                 in_layout = 1;
+                in_wires  = 0;
+                continue;
+            }
+            /* "# @wires" enters wires mode (Phase 7). Subsequent "# @ ..." lines
+               are net headers ("net=<name>") or segment entries ("h ..." / "v ..."). */
+            if (strncmp(line, "# @wires", 8) == 0
+                && (line[8] == '\0' || isspace((unsigned char)line[8]))) {
+                in_layout = 0;
+                in_wires  = 1;
+                wires_current_net = -1;
                 continue;
             }
             /* "# @  name = x, y" while in layout mode → position entry */
             if (in_layout && strncmp(line, "# @", 3) == 0) {
                 parse_layout_entry(c, line + 3);
+                continue;
+            }
+            /* wires-block sub-line; ignored unless caller wants geometry */
+            if (in_wires && geom_out && strncmp(line, "# @", 3) == 0) {
+                parse_wires_entry(geom_out, line + 3, &wires_current_net);
                 continue;
             }
             /* unknown annotation or plain comment: ignore (forward-compatible) */
@@ -192,6 +267,7 @@ circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
 
         /* ── structural line: strip any inline comment, then parse ── */
         in_layout = 0;
+        in_wires  = 0;
         char *hash = strchr(line, '#');
         if (hash) *hash = '\0';
         str_trim(line);
@@ -287,8 +363,31 @@ static int has_layout_data(const circuit_t *c) {
 }
 
 char *circuit_io_serialize(const circuit_t *c) {
+    return circuit_io_serialize_ex(c, NULL);
+}
+
+/* True if any net in geom has at least one segment. */
+static int has_any_wires(const wire_geometry_t *geom) {
+    if (!geom) return 0;
+    for (int i = 0; i < geom->net_count; i++) {
+        if (geom->nets[i].seg_count > 0) return 1;
+    }
+    return 0;
+}
+
+char *circuit_io_serialize_ex(const circuit_t *c, const wire_geometry_t *geom) {
+    /* Estimate extra capacity for the optional # @wires block. */
+    int wires_extra = 0;
+    if (has_any_wires(geom)) {
+        wires_extra += 32;     /* "\n# @wires\n" header */
+        for (int i = 0; i < geom->net_count; i++) {
+            wires_extra += 96;
+            wires_extra += geom->nets[i].seg_count * 72;
+        }
+    }
     int cap = 4096 + c->component_count * 256
-            + (c->input_count + c->output_count) * 96;
+            + (c->input_count + c->output_count) * 96
+            + wires_extra;
     char *buf = (char *)malloc(cap);
     if (!buf) return NULL;
     int pos = 0;
@@ -335,6 +434,27 @@ char *circuit_io_serialize(const circuit_t *c) {
             vec2_t p = c->output_positions[i];
             pos += snprintf(buf + pos, cap - pos, "# @  __output:%s = %g, %g\n",
                             c->output_names[i], p.x, p.y);
+        }
+    }
+
+    /* Optional wires-annotation block (supplement Phase 7). Skipped when geom
+       is NULL or every net is empty — keeps the legacy single-arg serializer
+       output byte-identical to what it produced before this phase landed. */
+    if (has_any_wires(geom)) {
+        pos += snprintf(buf + pos, cap - pos, "\n# @wires\n");
+        for (int i = 0; i < geom->net_count; i++) {
+            const wire_net_geom_t *n = &geom->nets[i];
+            if (n->seg_count == 0) continue;
+            pos += snprintf(buf + pos, cap - pos, "# @  net=%s\n", n->wire_name);
+            for (int s = 0; s < n->seg_count; s++) {
+                const wire_segment_t *seg = &n->segs[s];
+                char dir = (seg->a.y == seg->b.y) ? 'h' : 'v';
+                pos += snprintf(buf + pos, cap - pos,
+                                "# @    %c %g,%g \xe2\x86\x92 %g,%g\n",
+                                dir,
+                                seg->a.x, seg->a.y,
+                                seg->b.x, seg->b.y);
+            }
         }
     }
     return buf;

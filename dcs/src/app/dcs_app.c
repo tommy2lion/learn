@@ -37,11 +37,25 @@ static void on_canvas_status(const char *msg, void *user) {
 
 static void load_circuit_from_text(dcs_app_t *app, const char *path, const char *text) {
     char err[256] = {0};
-    circuit_t *c = circuit_io_parse(text, err, sizeof(err));
-    if (!c) { set_status(app, "Parse error: %s", err); return; }
+    /* Extract any persisted # @wires block alongside the circuit. */
+    wire_geometry_t parsed_wires;
+    wire_geometry_init(&parsed_wires);
+    circuit_t *c = circuit_io_parse_ex(text, err, sizeof(err), &parsed_wires);
+    if (!c) {
+        wire_geometry_release(&parsed_wires);
+        set_status(app, "Parse error: %s", err);
+        return;
+    }
     if (app->circuit) circuit_destroy(app->circuit);
     app->circuit = c;
+    /* set_circuit auto-routes from connectivity. If the file carried explicit
+       geometry, install it after — overriding the auto-seed so user-tweaked
+       routes survive round-trip. */
     circuit_canvas_widget_set_circuit(app->circuit_canvas, c);
+    if (parsed_wires.net_count > 0) {
+        circuit_canvas_widget_load_geometry(app->circuit_canvas, &parsed_wires);
+    }
+    wire_geometry_release(&parsed_wires);   /* no-op if moved */
     /* Reseat the input_panel's circuit reference via its public setter. */
     input_panel_set_circuit(app->input_panel, c);
     snprintf(app->file_path, sizeof(app->file_path), "%s", path);
@@ -80,7 +94,8 @@ static void action_open(dcs_app_t *app) {
 static void action_save_as(dcs_app_t *app) {
     char path[DCS_APP_FILE_PATH_LEN] = {0};
     if (!app->platform->save_file(app->platform->self, "Save .dcs", path, sizeof(path))) return;
-    char *text = circuit_io_serialize(app->circuit);
+    const wire_geometry_t *geom = circuit_canvas_widget_geometry(app->circuit_canvas);
+    char *text = circuit_io_serialize_ex(app->circuit, geom);
     if (!text) { set_status(app, "Serialize failed"); return; }
     int n = (int)strlen(text);
     int rc = app->platform->write_file(app->platform->self, path, text, n);
@@ -93,7 +108,8 @@ static void action_save_as(dcs_app_t *app) {
 
 static void action_save(dcs_app_t *app) {
     if (!app->path_is_explicit) { action_save_as(app); return; }
-    char *text = circuit_io_serialize(app->circuit);
+    const wire_geometry_t *geom = circuit_canvas_widget_geometry(app->circuit_canvas);
+    char *text = circuit_io_serialize_ex(app->circuit, geom);
     if (!text) { set_status(app, "Serialize failed"); return; }
     int n = (int)strlen(text);
     int rc = app->platform->write_file(app->platform->self, app->file_path, text, n);

@@ -3,8 +3,8 @@
 
 #include "../framework/widgets/widget.h"
 #include "../domain/circuit.h"
+#include "../domain/wire_geometry.h"
 #include "editor_state.h"
-#include "wire_geometry.h"
 
 /* Editor modes. Plain enum (a State-pattern refactor is a future polish). */
 typedef enum {
@@ -102,5 +102,16 @@ void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self);
    outlive the call. (Phase 6 — click-to-highlight) */
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
                                          const char *wire_name);
+
+/* Read-only access to the canvas's wire-geometry sidecar — used by the save
+   path to feed circuit_io_serialize_ex. (Phase 7) */
+const wire_geometry_t *circuit_canvas_widget_geometry(const circuit_canvas_widget_t *self);
+
+/* Replace the canvas's wire-geometry by transferring ownership from `src`.
+   Frees any existing geometry first. After the call `src` is empty (as if
+   freshly init'd). Used by the load path to install a `.dcs` file's
+   parsed # @wires block, overriding the seed-from-routing default. */
+void circuit_canvas_widget_load_geometry(circuit_canvas_widget_t *self,
+                                         wire_geometry_t *src);
 
 #endif /* DCS_APP_CIRCUIT_CANVAS_H */

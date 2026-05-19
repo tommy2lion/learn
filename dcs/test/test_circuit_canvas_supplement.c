@@ -9,7 +9,7 @@
  * brings cw->wires back into a correct shape. */
 
 #include "../src/app/circuit_canvas_widget.h"
-#include "../src/app/wire_geometry.h"
+#include "../src/domain/wire_geometry.h"
 #include "../src/domain/circuit.h"
 #include "../src/domain/component.h"
 #include "../src/framework/widgets/widget.h"

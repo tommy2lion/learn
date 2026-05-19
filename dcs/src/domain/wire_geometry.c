@@ -247,13 +247,14 @@ static float snap_to_grid(float v) {
     return (float)rounded * ROUTING_GRID;
 }
 
-/* Append (not replace) validated segments to net_idx. Symmetric to
-   set_segments — same validation, same atomicity on failure. */
-static int append_segments(wire_geometry_t *self, int net_idx,
-                           const wire_segment_t *segs, int count) {
+int wire_geometry_append_segments(wire_geometry_t *self, int net_idx,
+                                  const wire_segment_t *segs, int count) {
     if (net_idx < 0 || net_idx >= self->net_count) return -1;
-    if (count <= 0 || !segs)                       return -1;
+    if (count < 0)                                  return -1;
+    if (count == 0)                                 return 0;     /* no-op */
+    if (!segs)                                      return -1;
 
+    /* Validate first; leaves the net's existing segments untouched on failure. */
     for (int i = 0; i < count; i++) {
         if (!segment_is_valid(&segs[i])) return -1;
     }
@@ -272,6 +273,17 @@ static int append_segments(wire_geometry_t *self, int net_idx,
     memcpy(n->segs + n->seg_count, segs, sizeof(*segs) * (size_t)count);
     n->seg_count = new_count;
     return 0;
+}
+
+void wire_geometry_move(wire_geometry_t *dst, wire_geometry_t *src) {
+    if (!dst || !src || dst == src) return;
+    wire_geometry_release(dst);
+    dst->nets      = src->nets;
+    dst->net_count = src->net_count;
+    dst->net_cap   = src->net_cap;
+    src->nets      = NULL;
+    src->net_count = 0;
+    src->net_cap   = 0;
 }
 
 int auto_route_wire(wire_geometry_t *self, const char *wire_name,
@@ -318,5 +330,5 @@ int auto_route_wire(wire_geometry_t *self, const char *wire_name,
         count = 3;
     }
 
-    return append_segments(self, idx, segs, count);
+    return wire_geometry_append_segments(self, idx, segs, count);
 }
