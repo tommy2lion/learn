@@ -578,6 +578,144 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 6 — pick (click-to-highlight)
+       ────────────────────────────────────────────────────────────────── */
+
+    /* Build a fresh single-net scenario for the distance tests below. */
+    #define MAKE_ONE_NET(g, idx, seg_array, seg_count_value)               \
+        wire_geometry_init(&(g));                                          \
+        int idx = wire_geometry_get_or_create(&(g), "n1");                 \
+        wire_geometry_set_segments(&(g), idx, (seg_array), (seg_count_value))
+
+    /* ── pick: exact-on-segment hits ──────────────────────────────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 300, 50) };   /* H at y=50, x=100..300 */
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = NULL;
+        vec2_t p; p.x = 200; p.y = 50;
+        check("pick on-segment returns 1",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        check("pick on-segment returns net name",
+              name && strcmp(name, "n1") == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: exact endpoint hits ────────────────────────────────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 300, 50) };
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = NULL;
+        vec2_t p; p.x = 100; p.y = 50;
+        check("pick at endpoint a hits",  wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        p.x = 300;
+        check("pick at endpoint b hits",  wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: exactly `tol` away — hit (inclusive boundary) ──────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 300, 50) };
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = NULL;
+        /* Move perpendicular to segment by exactly 4.0 (= tol). */
+        vec2_t p; p.x = 200; p.y = 54;
+        check("pick at exactly tol distance hits (inclusive)",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: just outside `tol` — miss ──────────────────────────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 300, 50) };
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = (const char *)0xdeadbeef;   /* sentinel for "not set" */
+        vec2_t p; p.x = 200; p.y = 55;
+        check("pick just outside tol misses",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 0);
+        check("pick miss clears out-name",
+              name == NULL);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: beyond segment extent (off the end) ────────────────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 300, 50) };
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = NULL;
+        vec2_t p; p.x = 350; p.y = 50;   /* 50 px past endpoint b */
+        check("pick well past endpoint misses",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 0);
+        /* But within tol of the endpoint, it should hit. */
+        p.x = 302;
+        check("pick near endpoint b hits",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: multi-net — closest one wins ───────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int a = wire_geometry_get_or_create(&g, "near");
+        int b = wire_geometry_get_or_create(&g, "far");
+        wire_segment_t sa[] = { seg(0,  50, 200,  50) };
+        wire_segment_t sb[] = { seg(0, 100, 200, 100) };
+        wire_geometry_set_segments(&g, a, sa, 1);
+        wire_geometry_set_segments(&g, b, sb, 1);
+        const char *name = NULL;
+        vec2_t p; p.x = 100; p.y = 52;     /* 2 px from "near", 48 px from "far" */
+        check("pick multi-net returns closest",
+              wire_geometry_pick(&g, p, 10.0f, &name) == 1);
+        check("pick multi-net: 'near' won",
+              name && strcmp(name, "near") == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: empty geometry / no nets ───────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        const char *name = NULL;
+        vec2_t p; p.x = 50; p.y = 50;
+        check("pick empty geometry == 0", wire_geometry_pick(&g, p, 4.0f, &name) == 0);
+        check("pick empty: name still NULL", name == NULL);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: NULL / negative-tol safety ─────────────────────────── */
+    {
+        vec2_t p; p.x = 0; p.y = 0;
+        const char *name = NULL;
+        check("pick NULL self == 0", wire_geometry_pick(NULL, p, 4.0f, &name) == 0);
+        wire_geometry_t g; wire_geometry_init(&g);
+        check("pick negative tol == 0",
+              wire_geometry_pick(&g, p, -1.0f, &name) == 0);
+        check("pick out-name NULL is fine",
+              wire_geometry_pick(&g, p, 4.0f, NULL) == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── pick: V-segment, distance measured horizontally ──────────── */
+    {
+        wire_geometry_t g;
+        wire_segment_t s[] = { seg(100, 50, 100, 200) };    /* V at x=100, y=50..200 */
+        MAKE_ONE_NET(g, idx, s, 1); (void)idx;
+        const char *name = NULL;
+        vec2_t p; p.x = 103; p.y = 100;
+        check("pick near V segment hits",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 1);
+        p.x = 110;
+        check("pick 10px from V segment misses (tol=4)",
+              wire_geometry_pick(&g, p, 4.0f, &name) == 0);
+        wire_geometry_release(&g);
+    }
+
+    #undef MAKE_ONE_NET
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

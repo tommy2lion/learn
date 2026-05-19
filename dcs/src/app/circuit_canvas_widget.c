@@ -725,6 +725,8 @@ static void draw_node(igraph_t *g, const circuit_t *c, node_ref_t r, int hovered
 
 static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
     circuit_t *c = cw->circuit;
+    const char *hn = cw->highlighted_net;
+    int has_hl = hn[0] != '\0';
 
     /* wires first (under nodes). Pass 1: routed segments from the geometry
        sidecar (orthogonal). Stale entries — those whose producer was removed
@@ -732,9 +734,11 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
     for (int n = 0; n < cw->wires.net_count; n++) {
         const wire_net_geom_t *net = wire_geometry_net(&cw->wires, n);
         if (producer_for_wire(c, net->wire_name).kind == NODE_NONE) continue;
+        int hi = has_hl && strcmp(net->wire_name, hn) == 0;
+        uint32_t color = hi ? COLOR_ORANGE   : COLOR_DARKGRAY;
+        float    thick = hi ? 3.5f           : 2.0f;
         for (int s = 0; s < net->seg_count; s++) {
-            g->draw_line(g->self, net->segs[s].a, net->segs[s].b,
-                         2.0f, COLOR_DARKGRAY);
+            g->draw_line(g->self, net->segs[s].a, net->segs[s].b, thick, color);
         }
     }
     /* Pass 2: direct-line fallback for any consumer whose net has no geometry
@@ -751,7 +755,10 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
             if (src.kind == NODE_NONE) continue;
             vec2_t a = node_output_pin(c, src);
             vec2_t b = node_input_pin (c, (node_ref_t){NODE_COMPONENT, i}, p);
-            g->draw_line(g->self, a, b, 2.0f, COLOR_DARKGRAY);
+            int hi = has_hl && strcmp(wn, hn) == 0;
+            uint32_t color = hi ? COLOR_ORANGE   : COLOR_DARKGRAY;
+            float    thick = hi ? 3.5f           : 2.0f;
+            g->draw_line(g->self, a, b, thick, color);
         }
     }
     for (int i = 0; i < c->output_count; i++) {
@@ -761,18 +768,24 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
         if (src.kind == NODE_NONE) continue;
         vec2_t a = node_output_pin(c, src);
         vec2_t b = node_input_pin (c, (node_ref_t){NODE_OUTPUT, i}, 0);
-        g->draw_line(g->self, a, b, 2.0f, COLOR_DARKGRAY);
+        int hi = has_hl && strcmp(wn, hn) == 0;
+        uint32_t color = hi ? COLOR_ORANGE   : COLOR_DARKGRAY;
+        float    thick = hi ? 3.5f           : 2.0f;
+        g->draw_line(g->self, a, b, thick, color);
     }
     /* Pass 3: junction dots at fan-out / branch points (count >= 3 endpoints
        of the same net coinciding). Skipped for stale-producer nets. */
     for (int ni = 0; ni < cw->wires.net_count; ni++) {
         const wire_net_geom_t *net = wire_geometry_net(&cw->wires, ni);
         if (producer_for_wire(c, net->wire_name).kind == NODE_NONE) continue;
+        int hi = has_hl && strcmp(net->wire_name, hn) == 0;
+        uint32_t color = hi ? COLOR_ORANGE  : COLOR_BLACK;
+        float    r     = hi ? DOT_R * 1.5f  : DOT_R;
         vec2_t dots[16];
         int n = wire_geometry_junctions(net, dots, 16);
         if (n > 16) n = 16;
         for (int j = 0; j < n; j++) {
-            g->draw_circle(g->self, dots[j], DOT_R, COLOR_BLACK);
+            g->draw_circle(g->self, dots[j], r, color);
         }
     }
 
@@ -795,6 +808,34 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
         int hov = node_ref_eq(r, cw->hover_node);
         int sel = selection_contains(cw, r);
         draw_node(g, c, r, hov, sel);
+    }
+
+    /* Pin-emphasis pass for the highlighted net: enlarged orange dots on
+       every pin terminal that touches the net (producer's output pin +
+       every consumer's input pin). Drawn after draw_node so it sits on
+       top of the small black pin circles. */
+    if (has_hl) {
+        node_ref_t prod = producer_for_wire(c, hn);
+        if (prod.kind != NODE_NONE) {
+            g->draw_circle(g->self, node_output_pin(c, prod),
+                           PIN_R * 1.5f, COLOR_ORANGE);
+        }
+        for (int i = 0; i < c->component_count; i++) {
+            component_t *comp = c->components[i];
+            int n_in = component_pin_count_in(comp);
+            for (int p = 0; p < n_in; p++) {
+                if (strcmp(comp->in_wires[p], hn) != 0) continue;
+                g->draw_circle(g->self,
+                               node_input_pin(c, (node_ref_t){NODE_COMPONENT, i}, p),
+                               PIN_R * 1.5f, COLOR_ORANGE);
+            }
+        }
+        for (int i = 0; i < c->output_count; i++) {
+            if (strcmp(c->output_names[i], hn) != 0) continue;
+            g->draw_circle(g->self,
+                           node_input_pin(c, (node_ref_t){NODE_OUTPUT, i}, 0),
+                           PIN_R * 1.5f, COLOR_ORANGE);
+        }
     }
 
     /* wiring rubber-band (in world coords inside camera) */
@@ -1017,6 +1058,10 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
     }
 
     if (ev->kind == EV_MOUSE_PRESS && ev->mouse.btn == IM_LEFT) {
+        /* Any new left-click in IDLE drops the previous wire highlight; it's
+           re-applied below only if the click lands on a wire segment. */
+        circuit_canvas_widget_set_highlight(cw, NULL);
+
         /* output pin → start wiring */
         node_ref_t opin = hit_output_pin(cw, world);
         if (opin.kind != NODE_NONE) {
@@ -1047,6 +1092,16 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             vec2_t p = node_position(cw->circuit, hit);
             cw->drag_offset = (vec2_t){world.x - p.x, world.y - p.y};
             return 1;
+        }
+        /* wire segment → highlight the net (and stay in IDLE) */
+        {
+            const char *net_name = NULL;
+            float tol = 4.0f / (cw->cam_zoom > 0.0f ? cw->cam_zoom : 1.0f);
+            if (wire_geometry_pick(&cw->wires, world, tol, &net_name)) {
+                circuit_canvas_widget_set_highlight(cw, net_name);
+                status(cw, "Selected net %s", net_name);
+                return 1;
+            }
         }
         /* empty canvas → start marquee */
         selection_clear(cw);
@@ -1133,6 +1188,15 @@ void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self) {
     assert_geometry_consistent(self);
 }
 
+void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
+                                         const char *wire_name) {
+    if (!wire_name || !wire_name[0]) {
+        self->highlighted_net[0] = '\0';
+        return;
+    }
+    snprintf(self->highlighted_net, DOMAIN_NAME_LEN, "%s", wire_name);
+}
+
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->mode = CMODE_IDLE;
     self->place_kind = PLACE_NONE;
@@ -1144,6 +1208,7 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->counter_in = 0;
     self->counter_out = 0;
     self->counter_gate = 0;
+    self->highlighted_net[0] = '\0';
 }
 
 void circuit_canvas_widget_fit_view(circuit_canvas_widget_t *self) {

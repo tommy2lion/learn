@@ -72,6 +72,9 @@ class tagt_circuit_canvas_widget {
        mutations after seed leave geometry stale (Phase 4 hooks the mutation
        sites). */
     wire_geometry_t wires;
+
+    /* Click-to-highlight: empty string = no highlight (Phase 6). */
+    char highlighted_net[DOMAIN_NAME_LEN];
 };
 typedef class tagt_circuit_canvas_widget circuit_canvas_widget_t;
 
@@ -93,5 +96,11 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self);
    for any future caller that has mutated the underlying circuit_t outside
    the widget's normal event flow. */
 void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self);
+
+/* Highlight a net by wire name; NULL or empty string clears the highlight.
+   The string is copied into the widget; the input pointer doesn't need to
+   outlive the call. (Phase 6 — click-to-highlight) */
+void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
+                                         const char *wire_name);
 
 #endif /* DCS_APP_CIRCUIT_CANVAS_H */

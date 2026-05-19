@@ -164,6 +164,124 @@ int main(void) {
         circuit_destroy(c);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 6 — highlight state machine + click handler
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── set_highlight: store / clear / NULL / empty ──────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        check("create: highlight starts empty",
+              cw->highlighted_net[0] == '\0');
+        circuit_canvas_widget_set_highlight(cw, "g1");
+        check("set('g1'): highlight stored",
+              strcmp(cw->highlighted_net, "g1") == 0);
+        circuit_canvas_widget_set_highlight(cw, NULL);
+        check("set(NULL): cleared", cw->highlighted_net[0] == '\0');
+        circuit_canvas_widget_set_highlight(cw, "A");
+        check("set('A'): re-stored",
+              strcmp(cw->highlighted_net, "A") == 0);
+        circuit_canvas_widget_set_highlight(cw, "");
+        check("set(empty): cleared", cw->highlighted_net[0] == '\0');
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── left-click on a wire segment sets highlighted_net ────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        /* Override camera so world == screen, for deterministic event coords. */
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        /* Pick a world coord on net "A"'s first segment. */
+        int idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, idx);
+        vec2_t mid;
+        mid.x = (na->segs[0].a.x + na->segs[0].b.x) * 0.5f;
+        mid.y = (na->segs[0].a.y + na->segs[0].b.y) * 0.5f;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = mid;
+        widget_handle_event(&cw->base, &ev);
+
+        check("left-click on net A sets highlight to 'A'",
+              strcmp(cw->highlighted_net, "A") == 0);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── left-click on empty space clears highlight ───────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+        circuit_canvas_widget_set_highlight(cw, "A");
+        check("setup: highlight set to 'A'",
+              strcmp(cw->highlighted_net, "A") == 0);
+
+        /* Click in the far bottom-right corner — well outside any segment. */
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = (vec2_t){780, 580};
+        widget_handle_event(&cw->base, &ev);
+
+        check("left-click on empty space clears highlight",
+              cw->highlighted_net[0] == '\0');
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── second click on a different wire replaces highlight ──────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        const wire_net_geom_t *na =
+            wire_geometry_net(&cw->wires, wire_geometry_find(&cw->wires, "A"));
+        const wire_net_geom_t *nb =
+            wire_geometry_net(&cw->wires, wire_geometry_find(&cw->wires, "B"));
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+
+        /* First click: net A. */
+        ev.mouse.pos.x = (na->segs[0].a.x + na->segs[0].b.x) * 0.5f;
+        ev.mouse.pos.y = (na->segs[0].a.y + na->segs[0].b.y) * 0.5f;
+        widget_handle_event(&cw->base, &ev);
+        check("first click: highlight == 'A'",
+              strcmp(cw->highlighted_net, "A") == 0);
+
+        /* Second click: net B. */
+        ev.mouse.pos.x = (nb->segs[0].a.x + nb->segs[0].b.x) * 0.5f;
+        ev.mouse.pos.y = (nb->segs[0].a.y + nb->segs[0].b.y) * 0.5f;
+        widget_handle_event(&cw->base, &ev);
+        check("second click on net B: highlight switched",
+              strcmp(cw->highlighted_net, "B") == 0);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

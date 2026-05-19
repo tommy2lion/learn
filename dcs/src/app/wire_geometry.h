@@ -82,6 +82,16 @@ int wire_segments_collinear(const wire_segment_t *a, const wire_segment_t *b);
 int wire_geometry_junctions(const wire_net_geom_t *net,
                             vec2_t *out, int max_out);
 
+/* Hit-test: find the net whose nearest segment is within `tol` world-space
+   units of `world`. If several nets are within tolerance, the one with the
+   smallest distance wins (ties broken by net index — earlier net wins).
+
+   On hit, `*net_name_out` (if non-NULL) is set to a pointer into the net's
+   own wire_name buffer (valid until the geometry is mutated). Returns 1
+   on hit, 0 on miss. */
+int wire_geometry_pick(const wire_geometry_t *self, vec2_t world, float tol,
+                       const char **net_name_out);
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.

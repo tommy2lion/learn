@@ -151,6 +151,51 @@ static int points_equal(vec2_t p, vec2_t q) {
     return p.x == q.x && p.y == q.y;
 }
 
+/* Squared distance from point p to the H-or-V segment s. Works for arbitrary
+   segments too (general projection), so the H/V invariant isn't strictly
+   required — but our routes are always H or V by construction. */
+static float seg_dist_sq(vec2_t p, const wire_segment_t *s) {
+    float dx = s->b.x - s->a.x;
+    float dy = s->b.y - s->a.y;
+    float len_sq = dx * dx + dy * dy;
+    if (len_sq <= 0.0f) {
+        /* Degenerate (zero-length) segment: distance to its anchor point. */
+        float ex = p.x - s->a.x, ey = p.y - s->a.y;
+        return ex * ex + ey * ey;
+    }
+    float t = ((p.x - s->a.x) * dx + (p.y - s->a.y) * dy) / len_sq;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    float fx = s->a.x + t * dx;
+    float fy = s->a.y + t * dy;
+    float ex = p.x - fx, ey = p.y - fy;
+    return ex * ex + ey * ey;
+}
+
+int wire_geometry_pick(const wire_geometry_t *self, vec2_t world, float tol,
+                       const char **net_name_out) {
+    if (net_name_out) *net_name_out = NULL;
+    if (!self || tol < 0.0f) return 0;
+
+    float tol_sq = tol * tol;
+    float best_sq = tol_sq;
+    int   best_net = -1;
+
+    for (int i = 0; i < self->net_count; i++) {
+        const wire_net_geom_t *net = &self->nets[i];
+        for (int s = 0; s < net->seg_count; s++) {
+            float d_sq = seg_dist_sq(world, &net->segs[s]);
+            if (d_sq <= best_sq) {
+                best_sq  = d_sq;
+                best_net = i;
+            }
+        }
+    }
+    if (best_net < 0) return 0;
+    if (net_name_out) *net_name_out = self->nets[best_net].wire_name;
+    return 1;
+}
+
 int wire_geometry_junctions(const wire_net_geom_t *net,
                             vec2_t *out, int max_out) {
     if (!net || net->seg_count == 0 || !out || max_out <= 0) return 0;
