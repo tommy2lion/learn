@@ -57,4 +57,19 @@ int wire_geometry_set_segments(wire_geometry_t *self, int net_idx,
 /* Read-only access. Returns NULL if idx is out of range. */
 const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx);
 
+/* Compute an orthogonal route from producer_pin to consumer_pin and append
+   the resulting segments to the net identified by wire_name. Three cases:
+     - producer_pin.y == consumer_pin.y  → one horizontal segment.
+     - producer_pin.x == consumer_pin.x  → one vertical   segment.
+     - otherwise                         → three-segment Z-shape with the
+       midpoint column snapped to the routing grid (8 px).
+   The function APPENDS to the net's segment list — one net can carry the
+   routes of several consumers from one producer (just call this once per
+   consumer). The net is auto-created on first use.
+   Degenerate input (producer == consumer) creates the net but emits no
+   segments and returns 0.
+   Returns 0 on success, -1 on invalid wire_name or allocation failure. */
+int auto_route_wire(wire_geometry_t *self, const char *wire_name,
+                    vec2_t producer_pin, vec2_t consumer_pin);
+
 #endif /* DCS_APP_WIRE_GEOMETRY_H */

@@ -206,6 +206,162 @@ int main(void) {
               g.nets == NULL && g.net_count == 0 && g.net_cap == 0);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 2 — Z-router
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── auto_route_wire: same row → one horizontal segment ───────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t p; p.x = 100; p.y = 100;
+        vec2_t c; c.x = 300; c.y = 100;
+        check("route H-only returns 0",
+              auto_route_wire(&g, "h1", p, c) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "h1"));
+        check("H-only: 1 segment", n && n->seg_count == 1);
+        check("H-only: endpoints copied",
+              n && n->segs[0].a.x == 100 && n->segs[0].a.y == 100
+                && n->segs[0].b.x == 300 && n->segs[0].b.y == 100);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: same column → one vertical segment ──────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t p; p.x = 100; p.y = 100;
+        vec2_t c; c.x = 100; c.y = 300;
+        check("route V-only returns 0",
+              auto_route_wire(&g, "v1", p, c) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "v1"));
+        check("V-only: 1 segment", n && n->seg_count == 1);
+        check("V-only: endpoints copied",
+              n && n->segs[0].a.x == 100 && n->segs[0].a.y == 100
+                && n->segs[0].b.x == 100 && n->segs[0].b.y == 300);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: Z-shape with on-grid midpoint ───────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t p; p.x = 100; p.y = 100;
+        vec2_t c; c.x = 300; c.y = 200;
+        check("route Z returns 0", auto_route_wire(&g, "z1", p, c) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "z1"));
+        check("Z: 3 segments", n && n->seg_count == 3);
+        /* mid_x = (100 + 300) / 2 = 200, already grid-aligned */
+        check("Z seg0: producer → (200, prod.y) horizontal",
+              n && n->segs[0].a.x == 100 && n->segs[0].a.y == 100
+                && n->segs[0].b.x == 200 && n->segs[0].b.y == 100);
+        check("Z seg1: vertical at mid_x=200",
+              n && n->segs[1].a.x == 200 && n->segs[1].b.x == 200
+                && n->segs[1].a.y == 100 && n->segs[1].b.y == 200);
+        check("Z seg2: (200, cons.y) → consumer horizontal",
+              n && n->segs[2].a.x == 200 && n->segs[2].a.y == 200
+                && n->segs[2].b.x == 300 && n->segs[2].b.y == 200);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: mid_x snaps to grid (8 px step) ─────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* raw mid_x = (0 + 20) / 2 = 10 → snap to 8 */
+        vec2_t p; p.x = 0;  p.y = 0;
+        vec2_t c; c.x = 20; c.y = 40;
+        check("route Z snap returns 0",
+              auto_route_wire(&g, "z2", p, c) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "z2"));
+        check("Z snap: 3 segments", n && n->seg_count == 3);
+        check("Z snap: mid_x == 8 (grid-aligned)",
+              n && n->segs[1].a.x == 8.0f && n->segs[1].b.x == 8.0f);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: snap collapse → nudge keeps all 3 segs non-zero ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* producer.x = 0, consumer.x = 4 → raw mid = 2 → snap to 0 (== producer);
+           nudge +grid → mid_x = 8. Third segment is (8, cons.y) → (4, cons.y). */
+        vec2_t p; p.x = 0; p.y = 0;
+        vec2_t c; c.x = 4; c.y = 10;
+        check("route close-pins returns 0",
+              auto_route_wire(&g, "z3", p, c) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "z3"));
+        check("close-pins: 3 segments still", n && n->seg_count == 3);
+        check("close-pins: mid_x nudged off producer.x",
+              n && n->segs[1].a.x != p.x);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: fan-out — two consumers append to same net ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0; prod.y = 0;
+        vec2_t c1;   c1.x   = 200; c1.y   = 100;
+        vec2_t c2;   c2.x   = 200; c2.y   = 200;
+        check("fan-out consumer 1", auto_route_wire(&g, "fo", prod, c1) == 0);
+        check("fan-out consumer 2", auto_route_wire(&g, "fo", prod, c2) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "fo"));
+        /* Both consumers form Z-shapes (different y from producer) → 3 + 3 = 6 segments */
+        check("fan-out: 6 total segments accumulated", n && n->seg_count == 6);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: degenerate (producer == consumer) → no segs ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t p; p.x = 100; p.y = 100;
+        check("route same-point returns 0",
+              auto_route_wire(&g, "p1", p, p) == 0);
+        int idx = wire_geometry_find(&g, "p1");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("same-point: net created but 0 segments",
+              idx >= 0 && n && n->seg_count == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: invalid wire_name rejected ──────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t p; p.x = 0; p.y = 0;
+        vec2_t c; c.x = 100; c.y = 100;
+        check("route NULL  name == -1",
+              auto_route_wire(&g, NULL, p, c) == -1);
+        check("route empty name == -1",
+              auto_route_wire(&g, "",   p, c) == -1);
+        check("no nets created on invalid name", g.net_count == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── auto_route_wire: every emitted segment is purely H or V ──── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        struct { vec2_t a, b; const char *nm; } cases[] = {
+            { { 0,   0}, {123,  47}, "a" },
+            { {55,  33}, {200,  99}, "b" },
+            { {10,  10}, { 10, 100}, "c" },     /* vertical-only */
+            { { 7,  92}, {310,  92}, "d" },     /* horizontal-only */
+            { {-30, -10}, {77, -42}, "e" },     /* negative coords */
+        };
+        int n_cases = (int)(sizeof(cases) / sizeof(cases[0]));
+        for (int i = 0; i < n_cases; i++) {
+            auto_route_wire(&g, cases[i].nm, cases[i].a, cases[i].b);
+        }
+        int all_hv = 1;
+        int total_segs = 0;
+        for (int i = 0; i < g.net_count; i++) {
+            const wire_net_geom_t *n = &g.nets[i];
+            total_segs += n->seg_count;
+            for (int j = 0; j < n->seg_count; j++) {
+                int hv = (n->segs[j].a.x == n->segs[j].b.x)
+                      || (n->segs[j].a.y == n->segs[j].b.y);
+                if (!hv) { all_hv = 0; break; }
+            }
+        }
+        check("router emits only H or V segments",         all_hv);
+        check("router actually emitted segments",          total_segs > 0);
+        wire_geometry_release(&g);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

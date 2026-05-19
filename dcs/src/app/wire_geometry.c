@@ -114,3 +114,90 @@ const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx) {
     if (idx < 0 || idx >= self->net_count) return NULL;
     return &self->nets[idx];
 }
+
+/* ── Z-router (supplement Phase 2) ────────────────────────────────── */
+
+/* Routing-grid step. Matches the visual grid in circuit_canvas_widget.c;
+   kept file-local for now so it can be passed in or shared via a header
+   constant later if needed. */
+static const float ROUTING_GRID = 8.0f;
+
+static float snap_to_grid(float v) {
+    float n = v / ROUTING_GRID;
+    int rounded = (int)(n + (n >= 0.0f ? 0.5f : -0.5f));
+    return (float)rounded * ROUTING_GRID;
+}
+
+/* Append (not replace) validated segments to net_idx. Symmetric to
+   set_segments — same validation, same atomicity on failure. */
+static int append_segments(wire_geometry_t *self, int net_idx,
+                           const wire_segment_t *segs, int count) {
+    if (net_idx < 0 || net_idx >= self->net_count) return -1;
+    if (count <= 0 || !segs)                       return -1;
+
+    for (int i = 0; i < count; i++) {
+        if (!segment_is_valid(&segs[i])) return -1;
+    }
+
+    wire_net_geom_t *n = &self->nets[net_idx];
+    int new_count = n->seg_count + count;
+    if (new_count > n->seg_cap) {
+        int new_cap = n->seg_cap == 0 ? 4 : n->seg_cap;
+        while (new_cap < new_count) new_cap *= 2;
+        wire_segment_t *tmp = (wire_segment_t *)realloc(n->segs,
+                                                       sizeof(*tmp) * (size_t)new_cap);
+        if (!tmp) return -1;
+        n->segs    = tmp;
+        n->seg_cap = new_cap;
+    }
+    memcpy(n->segs + n->seg_count, segs, sizeof(*segs) * (size_t)count);
+    n->seg_count = new_count;
+    return 0;
+}
+
+int auto_route_wire(wire_geometry_t *self, const char *wire_name,
+                    vec2_t producer_pin, vec2_t consumer_pin) {
+    int idx = wire_geometry_get_or_create(self, wire_name);
+    if (idx < 0) return -1;
+
+    /* Degenerate: same point. Net is created (above), no segments emitted. */
+    if (producer_pin.x == consumer_pin.x && producer_pin.y == consumer_pin.y) {
+        return 0;
+    }
+
+    wire_segment_t segs[3];
+    int count;
+
+    if (producer_pin.y == consumer_pin.y) {
+        /* horizontal straight-shot */
+        segs[0].a = producer_pin;
+        segs[0].b = consumer_pin;
+        count = 1;
+    } else if (producer_pin.x == consumer_pin.x) {
+        /* vertical straight-shot */
+        segs[0].a = producer_pin;
+        segs[0].b = consumer_pin;
+        count = 1;
+    } else {
+        /* Z-shape: horiz out from producer, vertical to consumer's y, horiz in to consumer */
+        float mid_x = snap_to_grid(producer_pin.x
+                                   + (consumer_pin.x - producer_pin.x) * 0.5f);
+        /* If snap collapsed mid_x onto either endpoint, the first or third
+           segment would be zero-length. Nudge one grid step in the right
+           direction so all three segments stay non-degenerate. */
+        float dir = (consumer_pin.x > producer_pin.x) ? ROUTING_GRID : -ROUTING_GRID;
+        if (mid_x == producer_pin.x) mid_x += dir;
+        if (mid_x == consumer_pin.x) mid_x -= dir;
+
+        vec2_t corner_top, corner_bot;
+        corner_top.x = mid_x; corner_top.y = producer_pin.y;
+        corner_bot.x = mid_x; corner_bot.y = consumer_pin.y;
+
+        segs[0].a = producer_pin; segs[0].b = corner_top;
+        segs[1].a = corner_top;   segs[1].b = corner_bot;
+        segs[2].a = corner_bot;   segs[2].b = consumer_pin;
+        count = 3;
+    }
+
+    return append_segments(self, idx, segs, count);
+}
