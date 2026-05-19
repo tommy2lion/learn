@@ -12,6 +12,7 @@
 #define PIN_R     4.0f
 #define PIN_HIT  9.0f
 #define WIRE_HIT 5
+#define DOT_R    3.0f      /* junction-dot radius (supplement Phase 5) */
 
 #define X_OFFSET 100.0f
 #define X_STEP   180.0f
@@ -761,6 +762,18 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
         vec2_t a = node_output_pin(c, src);
         vec2_t b = node_input_pin (c, (node_ref_t){NODE_OUTPUT, i}, 0);
         g->draw_line(g->self, a, b, 2.0f, COLOR_DARKGRAY);
+    }
+    /* Pass 3: junction dots at fan-out / branch points (count >= 3 endpoints
+       of the same net coinciding). Skipped for stale-producer nets. */
+    for (int ni = 0; ni < cw->wires.net_count; ni++) {
+        const wire_net_geom_t *net = wire_geometry_net(&cw->wires, ni);
+        if (producer_for_wire(c, net->wire_name).kind == NODE_NONE) continue;
+        vec2_t dots[16];
+        int n = wire_geometry_junctions(net, dots, 16);
+        if (n > 16) n = 16;
+        for (int j = 0; j < n; j++) {
+            g->draw_circle(g->self, dots[j], DOT_R, COLOR_BLACK);
+        }
     }
 
     /* nodes — inputs, components, outputs (so components draw on top of

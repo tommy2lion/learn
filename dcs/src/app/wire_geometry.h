@@ -62,6 +62,26 @@ const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx);
    Net indices of remaining nets may change after this call. */
 int wire_geometry_remove_net(wire_geometry_t *self, const char *wire_name);
 
+/* Two segments are collinear iff both are horizontal at the same y OR both
+   are vertical at the same x. Used to distinguish a polyline bend (corner)
+   from a straight continuation. */
+int wire_segments_collinear(const wire_segment_t *a, const wire_segment_t *b);
+
+/* Compute one net's junction points: points where three or more segment
+   endpoints of THIS net coincide. These are the fan-out / branch locations
+   where the renderer should draw a black join-dot.
+
+   Simple polyline corners (count == 2) are NOT junctions — by convention
+   they're just bends and need no dot. Crossings between segments of
+   DIFFERENT nets are also never junctions; this function only inspects
+   one net at a time.
+
+   Writes up to max_out points into `out` and returns the total count of
+   junctions found. If the return value exceeds max_out, the buffer was
+   truncated. Returns 0 if net is NULL, empty, or out is NULL. */
+int wire_geometry_junctions(const wire_net_geom_t *net,
+                            vec2_t *out, int max_out);
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.

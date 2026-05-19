@@ -128,6 +128,67 @@ int wire_geometry_remove_net(wire_geometry_t *self, const char *wire_name) {
     return 1;
 }
 
+/* ── junction derivation (supplement Phase 5) ─────────────────────── */
+
+int wire_segments_collinear(const wire_segment_t *a, const wire_segment_t *b) {
+    if (!a || !b) return 0;
+    int a_h = (a->a.y == a->b.y);
+    int a_v = (a->a.x == a->b.x);
+    int b_h = (b->a.y == b->b.y);
+    int b_v = (b->a.x == b->b.x);
+    if (a_h && b_h && a->a.y == b->a.y) return 1;
+    if (a_v && b_v && a->a.x == b->a.x) return 1;
+    return 0;
+}
+
+/* Endpoint accessor: i=0..2N-1 picks the a-end of even segments and the
+   b-end of odd-indexed endpoints. */
+static vec2_t net_endpoint(const wire_net_geom_t *net, int i) {
+    return (i & 1) ? net->segs[i / 2].b : net->segs[i / 2].a;
+}
+
+static int points_equal(vec2_t p, vec2_t q) {
+    return p.x == q.x && p.y == q.y;
+}
+
+int wire_geometry_junctions(const wire_net_geom_t *net,
+                            vec2_t *out, int max_out) {
+    if (!net || net->seg_count == 0 || !out || max_out <= 0) return 0;
+
+    int n_eps = net->seg_count * 2;
+    int total = 0;     /* total junctions found (may exceed max_out) */
+
+    for (int i = 0; i < n_eps; i++) {
+        vec2_t p = net_endpoint(net, i);
+
+        /* First-occurrence rule: only inspect this point when i is the
+           earliest endpoint that equals p (skips duplicate counting). */
+        int first_seen = 1;
+        for (int k = 0; k < i; k++) {
+            if (points_equal(net_endpoint(net, k), p)) {
+                first_seen = 0;
+                break;
+            }
+        }
+        if (!first_seen) continue;
+
+        /* Count total occurrences of p across all endpoints. */
+        int count = 1;
+        for (int j = i + 1; j < n_eps; j++) {
+            if (points_equal(net_endpoint(net, j), p)) count++;
+        }
+
+        /* Junction iff three or more endpoints coincide here (T/+ join).
+           A count of 2 is just a polyline corner — no dot, per the demo
+           convention shown in step2-supplement-demo2.jpg. */
+        if (count >= 3) {
+            if (total < max_out) out[total] = p;
+            total++;
+        }
+    }
+    return total;
+}
+
 /* ── Z-router (supplement Phase 2) ────────────────────────────────── */
 
 /* Routing-grid step. Matches the visual grid in circuit_canvas_widget.c;
