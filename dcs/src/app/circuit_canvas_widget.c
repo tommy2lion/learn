@@ -188,6 +188,40 @@ static node_ref_t producer_for_wire(const circuit_t *c, const char *wire_name) {
     return NODE_REF_NONE;
 }
 
+/* (Re)build wire geometry from the current circuit's connectivity. Routes
+   every (producer-output-pin → consumer-input-pin) pair via auto_route_wire,
+   so fan-out nets accumulate one route per consumer in the same wire_net_geom_t.
+   Called from create() and set_circuit(); Phase 4 will also call it on
+   mutations. Releases any previous geometry first, so calling twice is fine. */
+static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
+    wire_geometry_release(&cw->wires);
+    wire_geometry_init   (&cw->wires);
+    circuit_t *c = cw->circuit;
+    if (!c) return;
+
+    for (int i = 0; i < c->component_count; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in; p++) {
+            const char *wn = comp->in_wires[p];
+            if (!wn[0]) continue;
+            node_ref_t src = producer_for_wire(c, wn);
+            if (src.kind == NODE_NONE) continue;
+            vec2_t a = node_output_pin(c, src);
+            vec2_t b = node_input_pin (c, (node_ref_t){NODE_COMPONENT, i}, p);
+            auto_route_wire(&cw->wires, wn, a, b);
+        }
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        const char *wn = c->output_names[i];
+        node_ref_t src = producer_for_wire(c, wn);
+        if (src.kind == NODE_NONE) continue;
+        vec2_t a = node_output_pin(c, src);
+        vec2_t b = node_input_pin (c, (node_ref_t){NODE_OUTPUT, i}, 0);
+        auto_route_wire(&cw->wires, wn, a, b);
+    }
+}
+
 /* ── hit testing ──────────────────────────────────────────────────── */
 
 static node_ref_t hit_node(const circuit_canvas_widget_t *cw, vec2_t world) {
@@ -591,13 +625,28 @@ static void draw_node(igraph_t *g, const circuit_t *c, node_ref_t r, int hovered
 static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
     circuit_t *c = cw->circuit;
 
-    /* wires first (under nodes) */
+    /* wires first (under nodes). Pass 1: routed segments from the geometry
+       sidecar (orthogonal). Stale entries — those whose producer was removed
+       from the circuit — are filtered so they don't render as ghosts. */
+    for (int n = 0; n < cw->wires.net_count; n++) {
+        const wire_net_geom_t *net = wire_geometry_net(&cw->wires, n);
+        if (producer_for_wire(c, net->wire_name).kind == NODE_NONE) continue;
+        for (int s = 0; s < net->seg_count; s++) {
+            g->draw_line(g->self, net->segs[s].a, net->segs[s].b,
+                         2.0f, COLOR_DARKGRAY);
+        }
+    }
+    /* Pass 2: direct-line fallback for any consumer whose net has no geometry
+       (e.g. a wire created in the GUI after seed time — Phase 4 will hook the
+       mutation sites so this fallback becomes rare). */
     for (int i = 0; i < c->component_count; i++) {
         component_t *comp = c->components[i];
         int n_in = component_pin_count_in(comp);
         for (int p = 0; p < n_in; p++) {
-            if (!comp->in_wires[p][0]) continue;
-            node_ref_t src = producer_for_wire(c, comp->in_wires[p]);
+            const char *wn = comp->in_wires[p];
+            if (!wn[0]) continue;
+            if (wire_geometry_find(&cw->wires, wn) >= 0) continue;
+            node_ref_t src = producer_for_wire(c, wn);
             if (src.kind == NODE_NONE) continue;
             vec2_t a = node_output_pin(c, src);
             vec2_t b = node_input_pin (c, (node_ref_t){NODE_COMPONENT, i}, p);
@@ -606,6 +655,7 @@ static void draw_world(circuit_canvas_widget_t *cw, igraph_t *g) {
     }
     for (int i = 0; i < c->output_count; i++) {
         const char *wn = c->output_names[i];
+        if (wire_geometry_find(&cw->wires, wn) >= 0) continue;
         node_ref_t src = producer_for_wire(c, wn);
         if (src.kind == NODE_NONE) continue;
         vec2_t a = node_output_pin(c, src);
@@ -891,7 +941,11 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
     return 1;  /* consume any other event so it doesn't fall through */
 }
 
-static void ccw_destroy(widget_t *self) { free(self); }
+static void ccw_destroy(widget_t *self) {
+    circuit_canvas_widget_t *cw = (circuit_canvas_widget_t *)self;
+    wire_geometry_release(&cw->wires);
+    free(cw);
+}
 
 static const widget_vt_t CCW_VT = {
     .draw         = ccw_draw,
@@ -919,8 +973,10 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
     cw->gate_w       = GATE_W;
     cw->gate_h       = GATE_H;
     cw->io_r         = IO_R;
+    wire_geometry_init(&cw->wires);
     if (c) {
         auto_layout(c);
+        seed_geometry_from_circuit(cw);
         circuit_canvas_widget_fit_view(cw);
         cw->counter_in   = c->input_count;
         cw->counter_out  = c->output_count;
@@ -934,10 +990,13 @@ void circuit_canvas_widget_set_circuit(circuit_canvas_widget_t *self, circuit_t 
     circuit_canvas_widget_reset(self);
     if (c) {
         auto_layout(c);
+        seed_geometry_from_circuit(self);
         circuit_canvas_widget_fit_view(self);
         self->counter_in   = c->input_count;
         self->counter_out  = c->output_count;
         self->counter_gate = c->component_count;
+    } else {
+        seed_geometry_from_circuit(self);   /* clears geometry when circuit goes NULL */
     }
 }
 

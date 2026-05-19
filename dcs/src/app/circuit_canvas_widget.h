@@ -4,6 +4,7 @@
 #include "../framework/widgets/widget.h"
 #include "../domain/circuit.h"
 #include "editor_state.h"
+#include "wire_geometry.h"
 
 /* Editor modes. Plain enum (a State-pattern refactor is a future polish). */
 typedef enum {
@@ -65,6 +66,12 @@ class tagt_circuit_canvas_widget {
 
     /* visual constants (filled in create) */
     float gate_w, gate_h, io_r;
+
+    /* orthogonal wire-segment sidecar — populated by seed_geometry_from_circuit
+       at create / set_circuit time; renderer reads from here. Phase-3 minimum:
+       mutations after seed leave geometry stale (Phase 4 hooks the mutation
+       sites). */
+    wire_geometry_t wires;
 };
 typedef class tagt_circuit_canvas_widget circuit_canvas_widget_t;
 
