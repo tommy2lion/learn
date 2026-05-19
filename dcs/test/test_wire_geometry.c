@@ -206,6 +206,35 @@ int main(void) {
               g.nets == NULL && g.net_count == 0 && g.net_cap == 0);
     }
 
+    /* ── wire_geometry_remove_net ─────────────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int a = wire_geometry_get_or_create(&g, "a");
+        int b = wire_geometry_get_or_create(&g, "b");
+        int c = wire_geometry_get_or_create(&g, "c");
+        (void)a; (void)b; (void)c;
+        wire_segment_t s[] = { seg(0, 0, 10, 0) };
+        wire_geometry_set_segments(&g, a, s, 1);
+        wire_geometry_set_segments(&g, b, s, 1);
+        wire_geometry_set_segments(&g, c, s, 1);
+
+        check("remove existing returns 1", wire_geometry_remove_net(&g, "b") == 1);
+        check("net_count drops by 1 after remove", g.net_count == 2);
+        check("removed net not findable", wire_geometry_find(&g, "b") == -1);
+        check("other nets still findable (a)", wire_geometry_find(&g, "a") >= 0);
+        check("other nets still findable (c)", wire_geometry_find(&g, "c") >= 0);
+
+        check("remove unknown returns 0", wire_geometry_remove_net(&g, "zzz") == 0);
+        check("remove NULL returns 0",    wire_geometry_remove_net(&g, NULL)  == 0);
+
+        /* remove all and check empty */
+        wire_geometry_remove_net(&g, "a");
+        wire_geometry_remove_net(&g, "c");
+        check("net_count == 0 after removing all", g.net_count == 0);
+
+        wire_geometry_release(&g);
+    }
+
     /* ──────────────────────────────────────────────────────────────────
        supplement Phase 2 — Z-router
        ────────────────────────────────────────────────────────────────── */

@@ -183,11 +183,29 @@ $(TEST_WIRE_GEOMETRY_EXE): src/app/wire_geometry.c src/app/wire_geometry.h $(TES
 test_wire_geometry: $(TEST_WIRE_GEOMETRY_EXE)
 	./$(TEST_WIRE_GEOMETRY_EXE)
 
+# ── Supplement Phase 4: canvas-widget mutation-hook integration tests ─
+TEST_CCW_SUP_SRC = test/test_circuit_canvas_supplement.c
+TEST_CCW_SUP_EXE = test/test_circuit_canvas_supplement.exe
+
+$(TEST_CCW_SUP_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                     $(DOMAIN_SRC) $(DOMAIN_HDR) \
+                     src/app/wire_geometry.c src/app/wire_geometry.h \
+                     src/app/circuit_canvas_widget.c src/app/circuit_canvas_widget.h \
+                     src/app/editor_state.h \
+                     $(TEST_CCW_SUP_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(FW_WIDGET_SRC) $(DOMAIN_SRC) \
+		src/app/wire_geometry.c src/app/circuit_canvas_widget.c \
+		$(TEST_CCW_SUP_SRC) -o $@
+
+test_circuit_canvas_supplement: $(TEST_CCW_SUP_EXE)
+	./$(TEST_CCW_SUP_EXE)
+
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)

@@ -88,4 +88,10 @@ void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t
 /* Reset visual + interaction state when the circuit is replaced (new/open). */
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self);
 
+/* Drop all wire geometry and re-route from the current circuit's connectivity.
+   Called internally by the canvas's mutation paths; exposed for testing and
+   for any future caller that has mutated the underlying circuit_t outside
+   the widget's normal event flow. */
+void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self);
+
 #endif /* DCS_APP_CIRCUIT_CANVAS_H */

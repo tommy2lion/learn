@@ -57,6 +57,11 @@ int wire_geometry_set_segments(wire_geometry_t *self, int net_idx,
 /* Read-only access. Returns NULL if idx is out of range. */
 const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx);
 
+/* Remove a net by wire_name (frees its segment list). No-op if not present
+   or wire_name is NULL. Returns 1 if a net was removed, 0 otherwise.
+   Net indices of remaining nets may change after this call. */
+int wire_geometry_remove_net(wire_geometry_t *self, const char *wire_name);
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.

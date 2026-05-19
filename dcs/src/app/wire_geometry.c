@@ -115,6 +115,19 @@ const wire_net_geom_t *wire_geometry_net(const wire_geometry_t *self, int idx) {
     return &self->nets[idx];
 }
 
+int wire_geometry_remove_net(wire_geometry_t *self, const char *wire_name) {
+    int idx = wire_geometry_find(self, wire_name);
+    if (idx < 0) return 0;
+    free(self->nets[idx].segs);
+    for (int i = idx; i < self->net_count - 1; i++) {
+        self->nets[i] = self->nets[i + 1];
+    }
+    /* zero the now-unused tail slot so future grow()s see clean state */
+    memset(&self->nets[self->net_count - 1], 0, sizeof(self->nets[0]));
+    self->net_count--;
+    return 1;
+}
+
 /* ── Z-router (supplement Phase 2) ────────────────────────────────── */
 
 /* Routing-grid step. Matches the visual grid in circuit_canvas_widget.c;

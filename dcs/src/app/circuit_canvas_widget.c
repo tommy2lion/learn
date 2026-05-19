@@ -191,8 +191,8 @@ static node_ref_t producer_for_wire(const circuit_t *c, const char *wire_name) {
 /* (Re)build wire geometry from the current circuit's connectivity. Routes
    every (producer-output-pin → consumer-input-pin) pair via auto_route_wire,
    so fan-out nets accumulate one route per consumer in the same wire_net_geom_t.
-   Called from create() and set_circuit(); Phase 4 will also call it on
-   mutations. Releases any previous geometry first, so calling twice is fine. */
+   Called from create() / set_circuit() and from the Phase-4 mutation paths.
+   Releases any previous geometry first, so calling twice is fine. */
 static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
     wire_geometry_release(&cw->wires);
     wire_geometry_init   (&cw->wires);
@@ -221,6 +221,71 @@ static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
         auto_route_wire(&cw->wires, wn, a, b);
     }
 }
+
+/* Erase one net's geometry and re-route it from the current circuit state.
+   Used by the targeted mutation hooks (connect / disconnect) — preserves
+   unrelated nets' geometry. NULL or empty wire_name is a no-op. */
+static void reseat_wire_geometry(circuit_canvas_widget_t *cw, const char *wire_name) {
+    if (!wire_name || !wire_name[0]) return;
+    wire_geometry_remove_net(&cw->wires, wire_name);
+    circuit_t *c = cw->circuit;
+    if (!c) return;
+
+    node_ref_t src = producer_for_wire(c, wire_name);
+    if (src.kind == NODE_NONE) return;       /* producer gone: leave the net erased */
+    vec2_t a = node_output_pin(c, src);
+
+    for (int i = 0; i < c->component_count; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in; p++) {
+            if (strcmp(comp->in_wires[p], wire_name) != 0) continue;
+            vec2_t b = node_input_pin(c, (node_ref_t){NODE_COMPONENT, i}, p);
+            auto_route_wire(&cw->wires, wire_name, a, b);
+        }
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        if (strcmp(c->output_names[i], wire_name) != 0) continue;
+        vec2_t b = node_input_pin(c, (node_ref_t){NODE_OUTPUT, i}, 0);
+        auto_route_wire(&cw->wires, wire_name, a, b);
+    }
+}
+
+#ifndef NDEBUG
+/* Debug-only invariant check: every wire-name currently referenced as a
+   consumer (in_wires[p] or output_names[i]) should be present in geometry
+   (since the seed / hooks should have routed it), and every geometry net
+   should still have a producer in the circuit. Cheap at our scale. */
+static void assert_geometry_consistent(const circuit_canvas_widget_t *cw) {
+    const circuit_t *c = cw->circuit;
+    if (!c) return;
+    for (int i = 0; i < c->component_count; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in; p++) {
+            const char *wn = comp->in_wires[p];
+            if (!wn[0]) continue;
+            if (producer_for_wire(c, wn).kind == NODE_NONE) continue;
+            if (wire_geometry_find(&cw->wires, wn) < 0) {
+                fprintf(stderr, "geometry-consistency: consumer %s pin %d "
+                        "refers to wire '%s' with no geometry entry\n",
+                        comp->name, p, wn);
+                abort();
+            }
+        }
+    }
+    for (int i = 0; i < cw->wires.net_count; i++) {
+        const wire_net_geom_t *n = &cw->wires.nets[i];
+        if (producer_for_wire(c, n->wire_name).kind == NODE_NONE) {
+            fprintf(stderr, "geometry-consistency: net '%s' has no producer "
+                    "in the circuit\n", n->wire_name);
+            abort();
+        }
+    }
+}
+#else
+#  define assert_geometry_consistent(cw) ((void)0)
+#endif
 
 /* ── hit testing ──────────────────────────────────────────────────── */
 
@@ -398,29 +463,54 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
     component_destroy(comp);
 }
 
-/* Disconnect input pin `pin` of component `idx` (clear its in_wires entry). */
+/* Disconnect input pin `pin` of component `idx` (clear its in_wires entry).
+   Reseats the affected net's geometry so the now-orphan consumer's segments
+   disappear and any remaining consumers re-route cleanly. */
 static void disconnect_input(circuit_canvas_widget_t *cw, int comp_idx, int pin) {
     component_t *c = cw->circuit->components[comp_idx];
+    char prev[DOMAIN_NAME_LEN];
+    snprintf(prev, sizeof(prev), "%s", c->in_wires[pin]);
     c->in_wires[pin][0] = '\0';
+    if (prev[0]) reseat_wire_geometry(cw, prev);
+    assert_geometry_consistent(cw);
 }
 
-/* Connect: set component[dst].in_wires[pin] to wire produced by `src`. */
+/* Connect: set component[dst].in_wires[pin] to wire produced by `src`.
+   For OUTPUT destinations, the output is renamed to the wire (smart-rename
+   from existing Step-2 behaviour). Either way, reseat the wire's geometry. */
 static void connect_wire(circuit_canvas_widget_t *cw, node_ref_t src, node_ref_t dst, int pin) {
     const char *wire_name;
     if (src.kind == NODE_INPUT)        wire_name = cw->circuit->input_names[src.index];
     else if (src.kind == NODE_COMPONENT) wire_name = cw->circuit->components[src.index]->name;
     else return;
 
+    /* Snapshot wire_name before any mutation — it points into circuit state
+       that is also the source of the upcoming snprintf, which is fine, but
+       safer to capture a private copy for the reseat call below. */
+    char wn[DOMAIN_NAME_LEN];
+    snprintf(wn, sizeof(wn), "%s", wire_name);
+
     if (dst.kind == NODE_COMPONENT) {
         component_t *c = cw->circuit->components[dst.index];
-        snprintf(c->in_wires[pin], DOMAIN_NAME_LEN, "%s", wire_name);
+        /* If this pin already had a different wire, reseat its previous net too
+           so its (now-orphaned) consumer segments are removed. */
+        char prev[DOMAIN_NAME_LEN];
+        snprintf(prev, sizeof(prev), "%s", c->in_wires[pin]);
+        snprintf(c->in_wires[pin], DOMAIN_NAME_LEN, "%s", wn);
+        if (prev[0] && strcmp(prev, wn) != 0) reseat_wire_geometry(cw, prev);
+        reseat_wire_geometry(cw, wn);
         status(cw, "Wired");
     } else if (dst.kind == NODE_OUTPUT) {
         /* Smart-rename: the OUTPUT's name should match the producer's wire so
            serialization round-trips. We rename the OUTPUT to the wire_name. */
-        snprintf(cw->circuit->output_names[dst.index], DOMAIN_NAME_LEN, "%s", wire_name);
+        char prev[DOMAIN_NAME_LEN];
+        snprintf(prev, sizeof(prev), "%s", cw->circuit->output_names[dst.index]);
+        snprintf(cw->circuit->output_names[dst.index], DOMAIN_NAME_LEN, "%s", wn);
+        if (prev[0] && strcmp(prev, wn) != 0) reseat_wire_geometry(cw, prev);
+        reseat_wire_geometry(cw, wn);
         status(cw, "Wired");
     }
+    assert_geometry_consistent(cw);
 }
 
 /* Find a wire entry whose dst is component[dst_idx], pin `pin`. (Editor wires
@@ -505,6 +595,10 @@ static void remove_component_at(circuit_canvas_widget_t *cw, int idx) {
     component_destroy(comp);
     for (int i = idx; i < c->component_count - 1; i++) c->components[i] = c->components[i + 1];
     c->component_count--;
+    /* Many nets touched (output wire gone, every fan-out into this component
+       lost a consumer). Full reseed is the simplest correct response. */
+    seed_geometry_from_circuit(cw);
+    assert_geometry_consistent(cw);
 }
 
 static void remove_input_at(circuit_canvas_widget_t *cw, int idx) {
@@ -531,6 +625,8 @@ static void remove_input_at(circuit_canvas_widget_t *cw, int idx) {
         c->input_positions[i] = c->input_positions[i + 1];
     }
     c->input_count--;
+    seed_geometry_from_circuit(cw);
+    assert_geometry_consistent(cw);
 }
 
 static void remove_output_at(circuit_canvas_widget_t *cw, int idx) {
@@ -540,6 +636,10 @@ static void remove_output_at(circuit_canvas_widget_t *cw, int idx) {
         c->output_positions[i] = c->output_positions[i + 1];
     }
     c->output_count--;
+    /* The output was a consumer on some net; that net's geometry has stale
+       segments going to the now-removed output position. Reseed handles it. */
+    seed_geometry_from_circuit(cw);
+    assert_geometry_consistent(cw);
 }
 
 /* node_ref indices shift after removals; for delete-many we sort in
@@ -843,6 +943,10 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
     if (cw->mode == CMODE_DRAGGING) {
         if (ev->kind == EV_MOUSE_RELEASE && ev->mouse.btn == IM_LEFT) {
             cw->mode = CMODE_IDLE; cw->drag_node = NODE_REF_NONE;
+            /* Multi-select drag can touch many wires at once; full reseed is
+               cheaper than tracking the touched set. */
+            seed_geometry_from_circuit(cw);
+            assert_geometry_consistent(cw);
             return 1;
         }
         return 1;
@@ -1009,6 +1113,11 @@ void circuit_canvas_widget_set_status_cb(circuit_canvas_widget_t *self,
 void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t kind) {
     self->mode = CMODE_PLACING;
     self->place_kind = kind;
+}
+
+void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self) {
+    seed_geometry_from_circuit(self);
+    assert_geometry_consistent(self);
 }
 
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
