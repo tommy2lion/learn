@@ -2,3 +2,9 @@ inputs: a, b
 outputs: y
 
 y = and(a, b)
+
+# @layout
+# @  y = 280, 280
+# @  __input:a = 100, 220
+# @  __input:b = 100, 340
+# @  __output:y = 460, 280
