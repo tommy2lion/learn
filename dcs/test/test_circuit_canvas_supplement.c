@@ -656,6 +656,219 @@ int main(void) {
         circuit_destroy(c);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 12 — wire-edit drag flow
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── press on a Z-route middle V → enter CMODE_WIRE_EDIT ───────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        check("setup: net A has 3 segs (Z-route)", na && na->seg_count == 3);
+        const wire_segment_t *v = &na->segs[1];
+        check("setup: middle seg is vertical", v->a.x == v->b.x);
+        float v_x_before = v->a.x;
+        vec2_t v_mid;
+        v_mid.x = v->a.x;
+        v_mid.y = (v->a.y + v->b.y) * 0.5f;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = v_mid;
+        widget_handle_event(&cw->base, &ev);
+        check("press on draggable V: enters WIRE_EDIT",
+              cw->mode == CMODE_WIRE_EDIT);
+        check("press: saved net_idx + seg_idx",
+              cw->we_net_idx == net_idx && cw->we_seg_idx == 1);
+
+        /* Drag +24 in x. */
+        ev.kind = EV_MOUSE_MOVE;
+        ev.mouse.pos.x = v_mid.x + 24;
+        ev.mouse.pos.y = v_mid.y;
+        widget_handle_event(&cw->base, &ev);
+        v = &cw->wires.nets[net_idx].segs[1];
+        check("drag: V seg moved to x = old + 24",
+              v->a.x == v_x_before + 24 && v->b.x == v_x_before + 24);
+        const wire_segment_t *h0 = &cw->wires.nets[net_idx].segs[0];
+        const wire_segment_t *h2 = &cw->wires.nets[net_idx].segs[2];
+        check("drag: neighbour H0 endpoint b followed",
+              h0->b.x == v_x_before + 24);
+        check("drag: neighbour H2 endpoint a followed",
+              h2->a.x == v_x_before + 24);
+
+        /* Release → back to IDLE. */
+        ev.kind      = EV_MOUSE_RELEASE;
+        ev.mouse.btn = IM_LEFT;
+        widget_handle_event(&cw->base, &ev);
+        check("release: mode back to IDLE",         cw->mode == CMODE_IDLE);
+        check("release: we_net_idx cleared to -1",  cw->we_net_idx == -1);
+        check("release: we_seg_idx cleared to -1",  cw->we_seg_idx == -1);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── pressing on a pin-terminal segment (Z-route first H) falls back
+       to the Phase-6 highlight behaviour rather than entering wire-edit ─ */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        const wire_segment_t *h0 = &na->segs[0];     /* touches producer pin */
+        vec2_t h0_mid;
+        h0_mid.x = (h0->a.x + h0->b.x) * 0.5f;
+        h0_mid.y = h0->a.y;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = h0_mid;
+        widget_handle_event(&cw->base, &ev);
+        check("pin-terminal seg: mode stays IDLE",
+              cw->mode == CMODE_IDLE);
+        check("pin-terminal seg: highlight set to net 'A'",
+              strcmp(cw->highlighted_net, "A") == 0);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── ESC during WIRE_EDIT cancels back to IDLE ────────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        const wire_segment_t *v = &na->segs[1];
+        vec2_t v_mid;
+        v_mid.x = v->a.x;
+        v_mid.y = (v->a.y + v->b.y) * 0.5f;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = v_mid;
+        widget_handle_event(&cw->base, &ev);
+        check("press enters WIRE_EDIT (setup)",
+              cw->mode == CMODE_WIRE_EDIT);
+
+        event_t esc;
+        memset(&esc, 0, sizeof(esc));
+        esc.kind    = EV_KEY_PRESS;
+        esc.key.key = IK_ESCAPE;
+        widget_handle_event(&cw->base, &esc);
+        check("ESC during WIRE_EDIT: mode back to IDLE",
+              cw->mode == CMODE_IDLE);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── right-click during WIRE_EDIT also cancels ────────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        const wire_segment_t *v = &na->segs[1];
+        vec2_t v_mid;
+        v_mid.x = v->a.x;
+        v_mid.y = (v->a.y + v->b.y) * 0.5f;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = v_mid;
+        widget_handle_event(&cw->base, &ev);
+        check("press enters WIRE_EDIT (setup)",
+              cw->mode == CMODE_WIRE_EDIT);
+
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_RIGHT;
+        widget_handle_event(&cw->base, &ev);
+        check("right-click during WIRE_EDIT: mode back to IDLE",
+              cw->mode == CMODE_IDLE);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── drag past the limit (would create zero-length) is refused
+       atomically — the wire stays at the last valid position. ────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        const wire_segment_t *v = &na->segs[1];
+        vec2_t v_mid;
+        v_mid.x = v->a.x;
+        v_mid.y = (v->a.y + v->b.y) * 0.5f;
+        float v_x_before = v->a.x;
+        float h0_a_x_before = na->segs[0].a.x;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = v_mid;
+        widget_handle_event(&cw->base, &ev);
+
+        /* Drag exactly to the producer pin's x — this is the threshold
+           where H0 collapses to zero length and the shift must be
+           refused atomically. */
+        ev.kind = EV_MOUSE_MOVE;
+        ev.mouse.pos.x = h0_a_x_before;          /* V.x → producer pin x */
+        ev.mouse.pos.y = v_mid.y;
+        widget_handle_event(&cw->base, &ev);
+
+        v = &cw->wires.nets[net_idx].segs[1];
+        check("refused drag: V stays at original x (atomic rollback)",
+              v->a.x == v_x_before);
+        check("refused drag: H0 unchanged",
+              cw->wires.nets[net_idx].segs[0].a.x == h0_a_x_before);
+
+        /* Release. */
+        ev.kind      = EV_MOUSE_RELEASE;
+        ev.mouse.btn = IM_LEFT;
+        widget_handle_event(&cw->base, &ev);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

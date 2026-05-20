@@ -196,6 +196,88 @@ int wire_geometry_pick(const wire_geometry_t *self, vec2_t world, float tol,
     return 1;
 }
 
+int wire_geometry_pick_segment(const wire_geometry_t *self, vec2_t world, float tol,
+                               int *net_idx_out, int *seg_idx_out) {
+    if (net_idx_out) *net_idx_out = -1;
+    if (seg_idx_out) *seg_idx_out = -1;
+    if (!self || tol < 0.0f) return 0;
+
+    float tol_sq = tol * tol;
+    float best_sq = tol_sq;
+    int   best_net = -1, best_seg = -1;
+
+    for (int i = 0; i < self->net_count; i++) {
+        const wire_net_geom_t *net = &self->nets[i];
+        for (int s = 0; s < net->seg_count; s++) {
+            float d_sq = seg_dist_sq(world, &net->segs[s]);
+            if (d_sq <= best_sq) {
+                best_sq  = d_sq;
+                best_net = i;
+                best_seg = s;
+            }
+        }
+    }
+    if (best_net < 0) return 0;
+    if (net_idx_out) *net_idx_out = best_net;
+    if (seg_idx_out) *seg_idx_out = best_seg;
+    return 1;
+}
+
+int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
+                                int seg_idx, float delta) {
+    if (!self || net_idx < 0 || net_idx >= self->net_count) return -1;
+    wire_net_geom_t *n = &self->nets[net_idx];
+    if (seg_idx < 0 || seg_idx >= n->seg_count) return -1;
+    if (delta == 0.0f) return 0;
+
+    /* Snapshot for rollback. */
+    wire_segment_t *backup =
+        (wire_segment_t *)malloc(sizeof(*backup) * (size_t)n->seg_count);
+    if (!backup) return -1;
+    memcpy(backup, n->segs, sizeof(*backup) * (size_t)n->seg_count);
+
+    wire_segment_t *s = &n->segs[seg_idx];
+    int is_h = (s->a.y == s->b.y);
+    int is_v = (s->a.x == s->b.x);
+    if (!is_h && !is_v) { free(backup); return -1; }
+
+    vec2_t old_a = s->a, old_b = s->b;
+
+    /* Shift the target segment perpendicular to its axis. */
+    if (is_h) { s->a.y += delta; s->b.y += delta; }
+    else      { s->a.x += delta; s->b.x += delta; }
+
+    /* Update every other segment whose endpoint matched the target's
+       pre-shift endpoint, so connectivity is preserved. */
+    for (int i = 0; i < n->seg_count; i++) {
+        if (i == seg_idx) continue;
+        wire_segment_t *t = &n->segs[i];
+        if (points_equal(t->a, old_a)) {
+            if (is_h) t->a.y += delta; else t->a.x += delta;
+        }
+        if (points_equal(t->b, old_a)) {
+            if (is_h) t->b.y += delta; else t->b.x += delta;
+        }
+        if (points_equal(t->a, old_b)) {
+            if (is_h) t->a.y += delta; else t->a.x += delta;
+        }
+        if (points_equal(t->b, old_b)) {
+            if (is_h) t->b.y += delta; else t->b.x += delta;
+        }
+    }
+
+    /* Validate: every segment must remain H/V and non-zero. */
+    int ok = 1;
+    for (int i = 0; i < n->seg_count; i++) {
+        if (!segment_is_valid(&n->segs[i])) { ok = 0; break; }
+    }
+    if (!ok) {
+        memcpy(n->segs, backup, sizeof(*backup) * (size_t)n->seg_count);
+    }
+    free(backup);
+    return ok ? 0 : -1;
+}
+
 int wire_geometry_junctions(const wire_net_geom_t *net,
                             vec2_t *out, int max_out) {
     if (!net || net->seg_count == 0 || !out || max_out <= 0) return 0;

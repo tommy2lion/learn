@@ -14,6 +14,7 @@ typedef enum {
     CMODE_WIRING,
     CMODE_DRAGGING,
     CMODE_MARQUEE,
+    CMODE_WIRE_EDIT,         /* dragging a wire segment perpendicular (Phase 12) */
 } canvas_mode_t;
 
 typedef enum {
@@ -76,6 +77,15 @@ class tagt_circuit_canvas_widget {
 
     /* Click-to-highlight: empty string = no highlight (Phase 6). */
     char highlighted_net[DOMAIN_NAME_LEN];
+
+    /* Wire-edit drag state (CMODE_WIRE_EDIT) — Phase 12. we_hover_cursor
+       is set by the event handler when hovering a draggable segment in
+       IDLE; ccw_draw consumes it via g->set_cursor (the event handler
+       doesn't have igraph). */
+    int           we_net_idx;
+    int           we_seg_idx;
+    vec2_t        we_last_world;
+    cursor_kind_t we_hover_cursor;
 
     /* External (black-box) vs internal (schematic) view — Phase 8/9.
        external_meta carries the display name (set to the file basename

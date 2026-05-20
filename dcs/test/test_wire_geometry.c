@@ -782,6 +782,176 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 12 — pick_segment + shift_segment
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── pick_segment returns matching net + segment indices ─────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int a = wire_geometry_get_or_create(&g, "a");
+        int b = wire_geometry_get_or_create(&g, "b");
+        wire_segment_t sa[] = {
+            seg(  0,  50, 100,  50),
+            seg(100,  50, 100, 150),
+        };
+        wire_segment_t sb[] = { seg(200, 50, 200, 150) };
+        wire_geometry_set_segments(&g, a, sa, 2);
+        wire_geometry_set_segments(&g, b, sb, 1);
+
+        int net_idx = -1, seg_idx = -1;
+        check("pick_segment: hit on net a seg 0",
+              wire_geometry_pick_segment(&g, (vec2_t){50, 50}, 4.0f,
+                                          &net_idx, &seg_idx) == 1
+              && net_idx == a && seg_idx == 0);
+        check("pick_segment: hit on net a seg 1 (vertical)",
+              wire_geometry_pick_segment(&g, (vec2_t){100, 100}, 4.0f,
+                                          &net_idx, &seg_idx) == 1
+              && net_idx == a && seg_idx == 1);
+        check("pick_segment: hit on net b seg 0",
+              wire_geometry_pick_segment(&g, (vec2_t){200, 100}, 4.0f,
+                                          &net_idx, &seg_idx) == 1
+              && net_idx == b && seg_idx == 0);
+        check("pick_segment: miss → out-params cleared to -1",
+              wire_geometry_pick_segment(&g, (vec2_t){500, 500}, 4.0f,
+                                          &net_idx, &seg_idx) == 0
+              && net_idx == -1 && seg_idx == -1);
+        check("pick_segment: NULL outs are safe",
+              wire_geometry_pick_segment(&g, (vec2_t){50, 50}, 4.0f,
+                                          NULL, NULL) == 1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment: Z-route middle V — both H neighbours follow ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "z");
+        wire_segment_t s[] = {
+            seg(  0,   0, 100,   0),    /* H — producer → corner_top */
+            seg(100,   0, 100,  50),    /* V — middle */
+            seg(100,  50, 200,  50),    /* H — corner_bot → consumer */
+        };
+        wire_geometry_set_segments(&g, idx, s, 3);
+
+        check("shift V middle by +20 succeeds",
+              wire_geometry_shift_segment(&g, idx, 1, +20.0f) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("shifted V seg now at x=120",
+              n->segs[1].a.x == 120 && n->segs[1].b.x == 120);
+        check("H seg 0 endpoint b followed to x=120",
+              n->segs[0].b.x == 120);
+        check("H seg 2 endpoint a followed to x=120",
+              n->segs[2].a.x == 120);
+        check("H seg 0 endpoint a stays at producer (x=0)",
+              n->segs[0].a.x == 0);
+        check("H seg 2 endpoint b stays at consumer (x=200)",
+              n->segs[2].b.x == 200);
+        check("all segments still H or V",
+              n->segs[0].a.y == n->segs[0].b.y
+              && n->segs[1].a.x == n->segs[1].b.x
+              && n->segs[2].a.y == n->segs[2].b.y);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment: H middle — both V neighbours follow in y ─── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "z");
+        wire_segment_t s[] = {
+            seg(  0,   0,   0,  50),    /* V */
+            seg(  0,  50, 100,  50),    /* H — middle */
+            seg(100,  50, 100, 100),    /* V */
+        };
+        wire_geometry_set_segments(&g, idx, s, 3);
+
+        check("shift H middle by -15 succeeds",
+              wire_geometry_shift_segment(&g, idx, 1, -15.0f) == 0);
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("shifted H seg now at y=35",
+              n->segs[1].a.y == 35 && n->segs[1].b.y == 35);
+        check("V seg 0 endpoint b followed to y=35",  n->segs[0].b.y == 35);
+        check("V seg 2 endpoint a followed to y=35",  n->segs[2].a.y == 35);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment: zero-delta is a no-op success ─────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "z");
+        wire_segment_t s[] = {
+            seg(  0,   0, 100,   0),
+            seg(100,   0, 100,  50),
+            seg(100,  50, 200,  50),
+        };
+        wire_geometry_set_segments(&g, idx, s, 3);
+        check("shift delta=0 returns 0 (no-op)",
+              wire_geometry_shift_segment(&g, idx, 1, 0.0f) == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment rejects shift that creates a zero-length seg ─ */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "z");
+        wire_segment_t s[] = {
+            seg(  0,   0, 100,   0),
+            seg(100,   0, 100,  50),
+            seg(100,  50, 200,  50),
+        };
+        wire_geometry_set_segments(&g, idx, s, 3);
+
+        /* Shifting middle V by -100 would collapse first H to zero-length
+           (its b would equal its a). Should be rejected with full rollback. */
+        check("shift over limit returns -1",
+              wire_geometry_shift_segment(&g, idx, 1, -100.0f) == -1);
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("rollback: V seg back at x=100",
+              n->segs[1].a.x == 100 && n->segs[1].b.x == 100);
+        check("rollback: H seg 0 unchanged",
+              n->segs[0].b.x == 100);
+        check("rollback: H seg 2 unchanged",
+              n->segs[2].a.x == 100);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment: invalid indices ───────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        int idx = wire_geometry_get_or_create(&g, "z");
+        wire_segment_t s[] = { seg(0, 0, 100, 0) };
+        wire_geometry_set_segments(&g, idx, s, 1);
+        check("shift bad net_idx returns -1",
+              wire_geometry_shift_segment(&g, 99, 0, 10.0f) == -1);
+        check("shift bad seg_idx returns -1",
+              wire_geometry_shift_segment(&g,  0, 99, 10.0f) == -1);
+        check("shift NULL self returns -1",
+              wire_geometry_shift_segment(NULL, 0, 0, 10.0f) == -1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_segment: fan-out — algorithm conservatively refuses when
+       the target shares an endpoint with multiple routes (corrupts the
+       other route into a diagonal). The app layer should detect this
+       and not initiate the drag. v1 limitation; the Steiner-trunk
+       router (Phase 13) would change the topology and make this work. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        auto_route_wire(&g, "fan", (vec2_t){0, 100}, (vec2_t){160,  50});
+        auto_route_wire(&g, "fan", (vec2_t){0, 100}, (vec2_t){160, 150});
+        int idx = wire_geometry_find(&g, "fan");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("setup: fan-out has 6 segments (3+3)", n->seg_count == 6);
+
+        /* seg 4 = second route's middle V. Shifting would corrupt the
+           first route's middle V (which shares corner_top at (80,100)). */
+        int rc = wire_geometry_shift_segment(&g, idx, 4, +24.0f);
+        check("fan-out V shift refused (would corrupt sibling route)",
+              rc == -1);
+        check("fan-out rollback: both Vs still at x=80 (unchanged)",
+              n->segs[1].a.x == 80 && n->segs[4].a.x == 80);
+        wire_geometry_release(&g);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

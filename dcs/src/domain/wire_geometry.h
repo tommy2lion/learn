@@ -104,6 +104,28 @@ int wire_geometry_junctions(const wire_net_geom_t *net,
 int wire_geometry_pick(const wire_geometry_t *self, vec2_t world, float tol,
                        const char **net_name_out);
 
+/* Like wire_geometry_pick, but also returns the index of the closest
+   segment within the winning net. Out-params may be NULL (caller-driven).
+   Returns 1 on hit, 0 on miss. (Phase 12 — bend-point editing) */
+int wire_geometry_pick_segment(const wire_geometry_t *self, vec2_t world, float tol,
+                               int *net_idx_out, int *seg_idx_out);
+
+/* Shift the seg_idx-th segment of net_idx perpendicular to its axis by
+   `delta`. For a horizontal segment (a.y == b.y), delta changes y; for
+   vertical, x. All other segments in the same net that share an endpoint
+   with the shifted segment are updated so connectivity is maintained.
+
+   Atomic: validates the H/V invariant + non-zero-length on every affected
+   segment after the shift; on failure the net's segments are restored to
+   their pre-call state and -1 is returned. delta == 0 is a successful no-op.
+
+   wire_geometry has no knowledge of pin terminal positions — the caller
+   is responsible for refusing to shift segments whose endpoints sit on a
+   producer/consumer pin (those should track the component instead).
+   (Phase 12 — bend-point editing) */
+int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
+                                int seg_idx, float delta);
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.

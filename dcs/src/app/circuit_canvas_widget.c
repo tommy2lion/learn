@@ -191,6 +191,60 @@ static node_ref_t producer_for_wire(const circuit_t *c, const char *wire_name) {
     return NODE_REF_NONE;
 }
 
+/* Returns 1 iff `pt` exactly matches the position of any pin terminal
+   (input pin, output pin, or any component input/output pin) in the
+   current circuit. Used to keep wire-edit drag away from pin endpoints —
+   those move only when their owning component moves. (Phase 12) */
+static int point_matches_pin(const circuit_t *c, vec2_t pt) {
+    if (!c) return 0;
+    for (int i = 0; i < c->input_count; i++) {
+        vec2_t p = node_output_pin(c, (node_ref_t){NODE_INPUT, i});
+        if (p.x == pt.x && p.y == pt.y) return 1;
+    }
+    for (int i = 0; i < c->component_count; i++) {
+        node_ref_t r = {NODE_COMPONENT, i};
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in; p++) {
+            vec2_t pp = node_input_pin(c, r, p);
+            if (pp.x == pt.x && pp.y == pt.y) return 1;
+        }
+        vec2_t op = node_output_pin(c, r);
+        if (op.x == pt.x && op.y == pt.y) return 1;
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        vec2_t p = node_input_pin(c, (node_ref_t){NODE_OUTPUT, i}, 0);
+        if (p.x == pt.x && p.y == pt.y) return 1;
+    }
+    return 0;
+}
+
+/* Returns 1 iff the segment can be safely dragged perpendicular: neither
+   endpoint sits on a pin terminal AND each endpoint is shared with exactly
+   one other segment (degree-2 corner). Higher degree means a branch /
+   junction — shifting would corrupt sibling routes and the underlying
+   wire_geometry_shift_segment would refuse the change anyway. (Phase 12) */
+static int seg_is_draggable(const circuit_canvas_widget_t *cw,
+                            int net_idx, int seg_idx) {
+    const wire_net_geom_t *net = wire_geometry_net(&cw->wires, net_idx);
+    if (!net || seg_idx < 0 || seg_idx >= net->seg_count) return 0;
+    const wire_segment_t *s = &net->segs[seg_idx];
+
+    if (point_matches_pin(cw->circuit, s->a)) return 0;
+    if (point_matches_pin(cw->circuit, s->b)) return 0;
+
+    int deg_a = 0, deg_b = 0;
+    for (int i = 0; i < net->seg_count; i++) {
+        if (i == seg_idx) continue;
+        const wire_segment_t *t = &net->segs[i];
+        if ((t->a.x == s->a.x && t->a.y == s->a.y) ||
+            (t->b.x == s->a.x && t->b.y == s->a.y)) deg_a++;
+        if ((t->a.x == s->b.x && t->a.y == s->b.y) ||
+            (t->b.x == s->b.x && t->b.y == s->b.y)) deg_b++;
+    }
+    return deg_a == 1 && deg_b == 1;
+}
+
 /* (Re)build wire geometry from the current circuit's connectivity. Routes
    every (producer-output-pin → consumer-input-pin) pair via auto_route_wire,
    so fan-out nets accumulate one route per consumer in the same wire_net_geom_t.
@@ -926,6 +980,20 @@ static void ccw_draw(widget_t *self, igraph_t *g) {
     g->draw_rect      (g->self, self->bounds, COLOR_BG);
     g->draw_rect_lines(g->self, self->bounds, 1.0f, COLOR_LIGHTGRAY);
 
+    /* Apply hover cursor stashed by the event handler. Wire-edit mode keeps
+       the resize cursor pinned through the drag. (Phase 12) */
+    if (g->set_cursor) {
+        cursor_kind_t cursor = cw->we_hover_cursor;
+        if (cw->mode == CMODE_WIRE_EDIT && cw->we_seg_idx >= 0) {
+            const wire_net_geom_t *net = wire_geometry_net(&cw->wires, cw->we_net_idx);
+            if (net && cw->we_seg_idx < net->seg_count) {
+                const wire_segment_t *s = &net->segs[cw->we_seg_idx];
+                cursor = (s->a.y == s->b.y) ? CURSOR_NS_RESIZE : CURSOR_EW_RESIZE;
+            }
+        }
+        g->set_cursor(g->self, cursor);
+    }
+
     g->push_scissor(g->self, self->bounds);
     if (cw->display_mode == DISPLAY_EXTERNAL && cw->circuit) {
         /* Black-box view: no camera transform, draw centered in viewport.
@@ -962,6 +1030,23 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
        node (and any other selected nodes by the same delta). */
     if (ev->kind == EV_MOUSE_MOVE) {
         cw->hover_node = hit_node(cw, world);
+        /* Wire-edit drag: shift the active segment perpendicular by the
+           cursor delta this frame. (Phase 12) */
+        if (cw->mode == CMODE_WIRE_EDIT) {
+            const wire_net_geom_t *net = wire_geometry_net(&cw->wires, cw->we_net_idx);
+            if (net && cw->we_seg_idx >= 0 && cw->we_seg_idx < net->seg_count) {
+                const wire_segment_t *s = &net->segs[cw->we_seg_idx];
+                int is_h = (s->a.y == s->b.y);
+                float delta = is_h ? (world.y - cw->we_last_world.y)
+                                   : (world.x - cw->we_last_world.x);
+                if (delta != 0.0f
+                    && wire_geometry_shift_segment(&cw->wires, cw->we_net_idx,
+                                                    cw->we_seg_idx, delta) == 0) {
+                    cw->we_last_world = world;
+                }
+            }
+            return 1;
+        }
         if (cw->mode == CMODE_DRAGGING && cw->drag_node.kind != NODE_NONE) {
             vec2_t old_pos = node_position(cw->circuit, cw->drag_node);
             vec2_t new_pos = {world.x - cw->drag_offset.x, world.y - cw->drag_offset.y};
@@ -974,6 +1059,23 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
                     set_node_position(cw->circuit, cw->selection[i],
                                       (vec2_t){p.x + delta.x, p.y + delta.y});
                 }
+            }
+        }
+        /* Hover cursor: when in IDLE and hovering a draggable wire segment,
+           stash an E-W cursor (vertical seg → drag horizontally) or N-S
+           cursor (horizontal seg → drag vertically). ccw_draw applies it
+           via g->set_cursor since the event handler doesn't have an
+           igraph_t. (Phase 12) */
+        if (cw->mode == CMODE_IDLE && cw->hover_node.kind == NODE_NONE) {
+            cw->we_hover_cursor = CURSOR_DEFAULT;
+            float tol = 4.0f / (cw->cam_zoom > 0.0f ? cw->cam_zoom : 1.0f);
+            int hit_net = -1, hit_seg = -1;
+            if (wire_geometry_pick_segment(&cw->wires, world, tol,
+                                            &hit_net, &hit_seg)
+                && seg_is_draggable(cw, hit_net, hit_seg)) {
+                const wire_segment_t *s = &cw->wires.nets[hit_net].segs[hit_seg];
+                cw->we_hover_cursor = (s->a.y == s->b.y)
+                                    ? CURSOR_NS_RESIZE : CURSOR_EW_RESIZE;
             }
         }
         return 1;
@@ -1071,6 +1173,35 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
         return 1;
     }
 
+    if (cw->mode == CMODE_WIRE_EDIT) {
+        /* MOUSE_MOVE for wire-edit drag is handled in the early MOVE block
+           above (which has access to `world` and returns). Press/release
+           and cancel keys are handled here. */
+        if (ev->kind == EV_MOUSE_RELEASE && ev->mouse.btn == IM_LEFT) {
+            cw->mode       = CMODE_IDLE;
+            cw->we_net_idx = -1;
+            cw->we_seg_idx = -1;
+            assert_geometry_consistent(cw);
+            return 1;
+        }
+        /* ESC / right-click cancels — original geometry isn't restored
+           since incremental shifts have already mutated; the user can
+           drag back to a similar shape. */
+        if (ev->kind == EV_KEY_PRESS && ev->key.key == IK_ESCAPE) {
+            cw->mode = CMODE_IDLE;
+            cw->we_net_idx = -1;
+            cw->we_seg_idx = -1;
+            return 1;
+        }
+        if (ev->kind == EV_MOUSE_PRESS && ev->mouse.btn == IM_RIGHT) {
+            cw->mode = CMODE_IDLE;
+            cw->we_net_idx = -1;
+            cw->we_seg_idx = -1;
+            return 1;
+        }
+        return 1;
+    }
+
     if (cw->mode == CMODE_MARQUEE) {
         if (ev->kind == EV_MOUSE_RELEASE && ev->mouse.btn == IM_LEFT) {
             float x0 = (cw->marquee_start.x < world.x) ? cw->marquee_start.x : world.x;
@@ -1158,13 +1289,26 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             cw->drag_offset = (vec2_t){world.x - p.x, world.y - p.y};
             return 1;
         }
-        /* wire segment → highlight the net (and stay in IDLE) */
+        /* wire segment hit: either start a bend-edit drag (Phase 12) or
+           just highlight the net (Phase 6) — depends on draggability. */
         {
-            const char *net_name = NULL;
             float tol = 4.0f / (cw->cam_zoom > 0.0f ? cw->cam_zoom : 1.0f);
-            if (wire_geometry_pick(&cw->wires, world, tol, &net_name)) {
-                circuit_canvas_widget_set_highlight(cw, net_name);
-                status(cw, "Selected net %s", net_name);
+            int hit_net = -1, hit_seg = -1;
+            if (wire_geometry_pick_segment(&cw->wires, world, tol,
+                                            &hit_net, &hit_seg)) {
+                if (seg_is_draggable(cw, hit_net, hit_seg)) {
+                    cw->mode         = CMODE_WIRE_EDIT;
+                    cw->we_net_idx   = hit_net;
+                    cw->we_seg_idx   = hit_seg;
+                    cw->we_last_world = world;
+                    return 1;
+                }
+                /* Not draggable — fall back to highlight behaviour. */
+                const wire_net_geom_t *net = wire_geometry_net(&cw->wires, hit_net);
+                if (net) {
+                    circuit_canvas_widget_set_highlight(cw, net->wire_name);
+                    status(cw, "Selected net %s", net->wire_name);
+                }
                 return 1;
             }
         }
@@ -1210,6 +1354,9 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
     cw->gate_w       = GATE_W;
     cw->gate_h       = GATE_H;
     cw->io_r         = IO_R;
+    cw->we_net_idx   = -1;
+    cw->we_seg_idx   = -1;
+    cw->we_hover_cursor = CURSOR_DEFAULT;
     wire_geometry_init(&cw->wires);
     if (c) {
         auto_layout(c);
@@ -1308,6 +1455,10 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->highlighted_net[0] = '\0';
     self->display_mode = DISPLAY_INTERNAL;
     external_view_metadata_init(&self->external_meta);
+    self->we_net_idx      = -1;
+    self->we_seg_idx      = -1;
+    self->we_last_world   = (vec2_t){0, 0};
+    self->we_hover_cursor = CURSOR_DEFAULT;
 }
 
 void circuit_canvas_widget_fit_view(circuit_canvas_widget_t *self) {
