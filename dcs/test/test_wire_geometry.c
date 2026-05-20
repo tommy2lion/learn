@@ -1110,6 +1110,52 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ── V-bus collision avoidance: second net shifts left ────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Two nets with identical producer / leftmost-consumer geometry
+           would naturally pick the same V_bus_x. The second net should
+           shift leftward by 2*GRID (= 16 px) to keep a visible gap. */
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "first",  prod, cs, 2);
+        const wire_net_geom_t *first =
+            wire_geometry_net(&g, wire_geometry_find(&g, "first"));
+        /* First net: V_bus_x = snap((0+200)/2) = 104. */
+        check("first net: V bus at x=104",
+              first && first->segs[1].a.x == 104);
+
+        /* Second net with the same input geometry; should collide and
+           shift to 104 - 16 = 88. */
+        auto_route_net(&g, "second", prod, cs, 2);
+        const wire_net_geom_t *second =
+            wire_geometry_net(&g, wire_geometry_find(&g, "second"));
+        check("second net: V bus shifted to x=88 (collision avoidance)",
+              second && second->segs[1].a.x == 88);
+
+        /* Third net: collides with both 104 and 88 → shifts to 88-16=72. */
+        auto_route_net(&g, "third",  prod, cs, 2);
+        const wire_net_geom_t *third =
+            wire_geometry_net(&g, wire_geometry_find(&g, "third"));
+        check("third net: V bus shifted further to x=72",
+              third && third->segs[1].a.x == 72);
+
+        /* Non-overlapping y range — no collision even at same x. */
+        vec2_t prod2; prod2.x = 0;   prod2.y = 500;
+        vec2_t cs2[2];
+        cs2[0].x = 200; cs2[0].y = 450;
+        cs2[1].x = 300; cs2[1].y = 550;
+        auto_route_net(&g, "elsewhere", prod2, cs2, 2);
+        const wire_net_geom_t *elsewhere =
+            wire_geometry_net(&g, wire_geometry_find(&g, "elsewhere"));
+        check("non-overlapping y range: keeps natural V_bus_x = 104",
+              elsewhere && elsewhere->segs[1].a.x == 104);
+
+        wire_geometry_release(&g);
+    }
+
     /* ── NULL / empty wire_name returns -1 ────────────────────────── */
     {
         wire_geometry_t g; wire_geometry_init(&g);

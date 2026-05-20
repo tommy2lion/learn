@@ -505,6 +505,45 @@ int auto_route_net(wire_geometry_t *self, const char *wire_name,
     if (V_bus_x == producer.x) V_bus_x += dir;
     if (V_bus_x == min_cx)     V_bus_x -= dir;
 
+    /* Collision avoidance: shift V_bus_x leftward by 2*GRID whenever it
+       lands within 2*GRID of another net's existing V segment in an
+       overlapping y range. Gives the eye a visible gap between adjacent
+       buses. Caps the shifts so we don't crawl past the producer's
+       x; on overflow, accept the collision (user can drag via Phase 12).
+       (R-8 collision avoidance — user feedback.) */
+    const float MIN_VBUS_SPACING = 2.0f * ROUTING_GRID;
+    float net_y_lo = producer.y, net_y_hi = producer.y;
+    for (int i = 0; i < eff_n; i++) {
+        if (consumers[i].y < net_y_lo) net_y_lo = consumers[i].y;
+        if (consumers[i].y > net_y_hi) net_y_hi = consumers[i].y;
+    }
+    for (int attempt = 0; attempt < 16; attempt++) {
+        int collide = 0;
+        for (int ni = 0; ni < self->net_count && !collide; ni++) {
+            if (ni == net_idx) continue;     /* skip the net we're routing */
+            const wire_net_geom_t *other = &self->nets[ni];
+            for (int si = 0; si < other->seg_count; si++) {
+                const wire_segment_t *s = &other->segs[si];
+                if (s->a.x != s->b.x) continue;          /* not a V segment */
+                float dx = s->a.x - V_bus_x;
+                if (dx < 0) dx = -dx;
+                if (dx >= MIN_VBUS_SPACING) continue;    /* far enough */
+                float o_lo = s->a.y < s->b.y ? s->a.y : s->b.y;
+                float o_hi = s->a.y > s->b.y ? s->a.y : s->b.y;
+                if (o_hi < net_y_lo || o_lo > net_y_hi) continue;  /* no y overlap */
+                collide = 1;
+                break;
+            }
+        }
+        if (!collide) break;
+        /* Shift leftward (toward producer side); stop if we'd cross the
+           producer's x or go too far away. */
+        float next = V_bus_x - MIN_VBUS_SPACING;
+        if ((dir > 0 && next <= producer.x) ||
+            (dir < 0 && next >= producer.x)) break;
+        V_bus_x = next;
+    }
+
     /* H trunk from producer to V_bus_x (skipped if zero-length). */
     if (V_bus_x != producer.x) {
         wire_segment_t h;
