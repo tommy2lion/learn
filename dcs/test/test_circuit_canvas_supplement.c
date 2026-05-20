@@ -821,6 +821,90 @@ int main(void) {
         circuit_destroy(c);
     }
 
+    /* ── R-8 V bus drag: shift the shared V bus as a unit ────────── */
+    {
+        /* Build a circuit where one wire fans out to multiple consumers
+           so R-8 creates a shared V bus. Reusing make_simple_circuit
+           + a second consumer on net A. */
+        circuit_t *c = circuit_create();
+        circuit_add_input (c, "A");
+        circuit_add_input (c, "B");
+        circuit_add_output(c, "Y");
+        circuit_add_component(c, gate_and_create("g1"), "A", "B");
+        circuit_add_component(c, gate_and_create("g2"), "A", "B");
+        snprintf(c->output_names[0], DOMAIN_NAME_LEN, "g1");
+
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+
+        /* Net A drives g1.in[0] AND g2.in[0] — that's R-8 V bus territory. */
+        int net_idx = wire_geometry_find(&cw->wires, "A");
+        const wire_net_geom_t *na = wire_geometry_net(&cw->wires, net_idx);
+        check("R-8: net A has multiple segments", na && na->seg_count >= 3);
+
+        /* Find a V bus segment (vertical, with at least one sibling V at
+           the same column). */
+        int v_bus_seg = -1;
+        float v_bus_x = 0;
+        for (int i = 0; i < na->seg_count; i++) {
+            if (na->segs[i].a.x != na->segs[i].b.x) continue;
+            float col = na->segs[i].a.x;
+            int count = 0;
+            for (int j = 0; j < na->seg_count; j++) {
+                if (na->segs[j].a.x == na->segs[j].b.x
+                    && na->segs[j].a.x == col) count++;
+            }
+            if (count >= 2) { v_bus_seg = i; v_bus_x = col; break; }
+        }
+        check("R-8: found a V bus segment in net A", v_bus_seg >= 0);
+
+        /* Click on its midpoint → should enter WIRE_EDIT (V bus is draggable). */
+        const wire_segment_t *v = &na->segs[v_bus_seg];
+        vec2_t v_mid;
+        v_mid.x = v->a.x;
+        v_mid.y = (v->a.y + v->b.y) * 0.5f;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = v_mid;
+        widget_handle_event(&cw->base, &ev);
+        check("press on V bus seg: enters WIRE_EDIT",
+              cw->mode == CMODE_WIRE_EDIT);
+
+        /* Drag +16 in x — V bus should move as a unit. */
+        ev.kind = EV_MOUSE_MOVE;
+        ev.mouse.pos.x = v_mid.x + 16;
+        ev.mouse.pos.y = v_mid.y;
+        widget_handle_event(&cw->base, &ev);
+
+        const wire_net_geom_t *na2 =
+            wire_geometry_net(&cw->wires, net_idx);
+        /* Every V segment at the old column should have moved to the new one. */
+        int found_at_new_col = 0;
+        int still_at_old_col = 0;
+        for (int i = 0; i < na2->seg_count; i++) {
+            if (na2->segs[i].a.x != na2->segs[i].b.x) continue;
+            if (na2->segs[i].a.x == v_bus_x + 16) found_at_new_col++;
+            if (na2->segs[i].a.x == v_bus_x)      still_at_old_col++;
+        }
+        check("after V bus drag: V segs shifted to new column",
+              found_at_new_col >= 2 && still_at_old_col == 0);
+
+        ev.kind      = EV_MOUSE_RELEASE;
+        ev.mouse.btn = IM_LEFT;
+        widget_handle_event(&cw->base, &ev);
+        check("V bus drag release: back to IDLE",
+              cw->mode == CMODE_IDLE);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
     /* ── drag past the limit (would create zero-length) is refused
        atomically — the wire stays at the last valid position. ────── */
     {

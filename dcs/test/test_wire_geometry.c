@@ -1169,6 +1169,99 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       R-8 — shift_v_bus (drag the shared V bus as a unit)
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── shift_v_bus moves all V bus segs + trunk + stub endpoints ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Build a known R-8 layout. */
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "bus", prod, cs, 2);
+        int idx = wire_geometry_find(&g, "bus");
+        const wire_net_geom_t *net = wire_geometry_net(&g, idx);
+        /* Setup: trunk at index 0, V bus segs at 1+2, stubs at 3+4 */
+        check("setup: V bus column at x=104", net && net->segs[1].a.x == 104);
+
+        /* Shift V bus +20 in x. */
+        check("shift_v_bus(+20) returns 0",
+              wire_geometry_shift_v_bus(&g, idx, 104.0f, 20.0f) == 0);
+        net = wire_geometry_net(&g, idx);
+        check("V bus seg 0 moved to x=124",
+              net && net->segs[1].a.x == 124 && net->segs[1].b.x == 124);
+        check("V bus seg 1 moved to x=124",
+              net && net->segs[2].a.x == 124 && net->segs[2].b.x == 124);
+        check("trunk b endpoint followed to x=124",
+              net && net->segs[0].b.x == 124);
+        check("trunk a endpoint stays at producer (x=0)",
+              net && net->segs[0].a.x == 0);
+        check("H stub 0 a endpoint followed to x=124",
+              net && net->segs[3].a.x == 124);
+        check("H stub 0 b endpoint stays at consumer (x=200)",
+              net && net->segs[3].b.x == 200);
+        check("H stub 1 a endpoint followed to x=124",
+              net && net->segs[4].a.x == 124);
+        check("H stub 1 b endpoint stays at consumer (x=300)",
+              net && net->segs[4].b.x == 300);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_v_bus: zero delta is a no-op ────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "z", prod, cs, 2);
+        int idx = wire_geometry_find(&g, "z");
+        check("shift_v_bus delta=0 returns 0 (no-op)",
+              wire_geometry_shift_v_bus(&g, idx, 104.0f, 0.0f) == 0);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_v_bus: column with no V segs returns -1 ─────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "z", prod, cs, 2);
+        int idx = wire_geometry_find(&g, "z");
+        check("shift_v_bus at empty column returns -1",
+              wire_geometry_shift_v_bus(&g, idx, 999.0f, 10.0f) == -1);
+        check("shift_v_bus NULL self returns -1",
+              wire_geometry_shift_v_bus(NULL, idx, 104.0f, 10.0f) == -1);
+        check("shift_v_bus bad net_idx returns -1",
+              wire_geometry_shift_v_bus(&g, 99, 104.0f, 10.0f) == -1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── shift_v_bus: shift over the limit → atomic rollback ──────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "lim", prod, cs, 2);
+        int idx = wire_geometry_find(&g, "lim");
+        /* Shift V bus to x=200 — would collapse stub 0 (from 200 to 200). */
+        int rc = wire_geometry_shift_v_bus(&g, idx, 104.0f, +96.0f);
+        check("over-the-limit shift returns -1", rc == -1);
+        const wire_net_geom_t *net = wire_geometry_net(&g, idx);
+        check("rollback: V bus back at x=104",
+              net && net->segs[1].a.x == 104);
+        check("rollback: trunk b back at x=104",
+              net && net->segs[0].b.x == 104);
+        wire_geometry_release(&g);
+    }
+
     /* ── shift_segment: fan-out — algorithm conservatively refuses when
        the target shares an endpoint with multiple routes (corrupts the
        other route into a diagonal). The app layer should detect this

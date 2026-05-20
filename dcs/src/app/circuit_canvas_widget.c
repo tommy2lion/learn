@@ -219,11 +219,27 @@ static int point_matches_pin(const circuit_t *c, vec2_t pt) {
     return 0;
 }
 
-/* Returns 1 iff the segment can be safely dragged perpendicular: neither
-   endpoint sits on a pin terminal AND each endpoint is shared with exactly
-   one other segment (degree-2 corner). Higher degree means a branch /
-   junction — shifting would corrupt sibling routes and the underlying
-   wire_geometry_shift_segment would refuse the change anyway. (Phase 12) */
+/* Returns the number of vertical segments in the net at column x.
+   Used by seg_is_draggable to recognise shared V buses (>= 2 V segs
+   at the same column → draggable as a unit). (R-8 + drag) */
+static int v_bus_count_at(const wire_net_geom_t *net, float column_x) {
+    int n = 0;
+    for (int i = 0; i < net->seg_count; i++) {
+        const wire_segment_t *t = &net->segs[i];
+        if (t->a.x == t->b.x && t->a.x == column_x) n++;
+    }
+    return n;
+}
+
+/* Returns 1 iff the segment can be safely dragged. Two paths:
+     - A "V bus" segment (vertical, shares its column with at least one
+       other V segment in the same net) is draggable as a unit; the
+       shift_v_bus operation moves the whole bus together. Pin-terminal
+       check still applies — V bus segs shouldn't touch a pin.
+     - Otherwise: degree-2 corner rule (each endpoint shared with exactly
+       one other segment). Single V drops, middle V's in Z-routes, and
+       middle H's all qualify. Higher degree means a branch / junction
+       — shift_segment would refuse anyway. (Phase 12 + R-8 drag) */
 static int seg_is_draggable(const circuit_canvas_widget_t *cw,
                             int net_idx, int seg_idx) {
     const wire_net_geom_t *net = wire_geometry_net(&cw->wires, net_idx);
@@ -232,6 +248,11 @@ static int seg_is_draggable(const circuit_canvas_widget_t *cw,
 
     if (point_matches_pin(cw->circuit, s->a)) return 0;
     if (point_matches_pin(cw->circuit, s->b)) return 0;
+
+    /* V bus check: vertical segment with siblings at the same column. */
+    if (s->a.x == s->b.x && v_bus_count_at(net, s->a.x) >= 2) {
+        return 1;
+    }
 
     int deg_a = 0, deg_b = 0;
     for (int i = 0; i < net->seg_count; i++) {
@@ -1039,19 +1060,33 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
     if (ev->kind == EV_MOUSE_MOVE) {
         cw->hover_node = hit_node(cw, world);
         /* Wire-edit drag: shift the active segment perpendicular by the
-           cursor delta this frame. (Phase 12) */
+           cursor delta this frame. V bus segments (R-8 shared bus) move
+           as a unit via shift_v_bus; everything else uses shift_segment.
+           (Phase 12 + R-8 drag) */
         if (cw->mode == CMODE_WIRE_EDIT) {
             const wire_net_geom_t *net = wire_geometry_net(&cw->wires, cw->we_net_idx);
             if (net && cw->we_seg_idx >= 0 && cw->we_seg_idx < net->seg_count) {
                 const wire_segment_t *s = &net->segs[cw->we_seg_idx];
-                int is_h = (s->a.y == s->b.y);
-                float delta = is_h ? (world.y - cw->we_last_world.y)
-                                   : (world.x - cw->we_last_world.x);
-                if (delta != 0.0f
-                    && wire_geometry_shift_segment(&cw->wires, cw->we_net_idx,
-                                                    cw->we_seg_idx, delta) == 0) {
-                    cw->we_last_world = world;
+                int is_h     = (s->a.y == s->b.y);
+                int is_v_bus = !is_h && v_bus_count_at(net, s->a.x) >= 2;
+                int rc = 0;
+                if (is_v_bus) {
+                    float delta = world.x - cw->we_last_world.x;
+                    if (delta != 0.0f) {
+                        rc = wire_geometry_shift_v_bus(&cw->wires,
+                                                       cw->we_net_idx,
+                                                       s->a.x, delta);
+                    }
+                } else {
+                    float delta = is_h ? (world.y - cw->we_last_world.y)
+                                       : (world.x - cw->we_last_world.x);
+                    if (delta != 0.0f) {
+                        rc = wire_geometry_shift_segment(&cw->wires,
+                                                          cw->we_net_idx,
+                                                          cw->we_seg_idx, delta);
+                    }
                 }
+                if (rc == 0) cw->we_last_world = world;
             }
             return 1;
         }

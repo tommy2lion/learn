@@ -126,6 +126,18 @@ int wire_geometry_pick_segment(const wire_geometry_t *self, vec2_t world, float 
 int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
                                 int seg_idx, float delta);
 
+/* Shift an entire vertical bus as a unit. All V segments in the net at
+   x == column_x are moved by `delta` along x; every non-V segment with
+   an endpoint at x == column_x has that endpoint updated by the same
+   delta (so trunk + stub connections follow). Used by the canvas
+   widget to make R-8 shared V buses draggable — single shift_segment
+   can't do this because V bus segments have degree-3 endpoints at
+   stub branch-offs. Atomic with rollback on H/V invariant or
+   zero-length validation failure. delta == 0 is a successful no-op.
+   Returns -1 if no V segment exists at column_x. */
+int wire_geometry_shift_v_bus(wire_geometry_t *self, int net_idx,
+                              float column_x, float delta);
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.

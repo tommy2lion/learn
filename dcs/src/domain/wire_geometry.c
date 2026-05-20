@@ -278,6 +278,59 @@ int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
     return ok ? 0 : -1;
 }
 
+int wire_geometry_shift_v_bus(wire_geometry_t *self, int net_idx,
+                              float column_x, float delta) {
+    if (!self || net_idx < 0 || net_idx >= self->net_count) return -1;
+    if (delta == 0.0f) return 0;
+
+    wire_net_geom_t *n = &self->nets[net_idx];
+
+    /* Verify at least one V segment exists at column_x. */
+    int v_count = 0;
+    for (int i = 0; i < n->seg_count; i++) {
+        const wire_segment_t *s = &n->segs[i];
+        if (s->a.x == s->b.x && s->a.x == column_x) v_count++;
+    }
+    if (v_count == 0) return -1;
+
+    /* Snapshot + mark V bus segments so we don't double-update them. */
+    wire_segment_t *backup =
+        (wire_segment_t *)malloc(sizeof(*backup) * (size_t)n->seg_count);
+    if (!backup) return -1;
+    memcpy(backup, n->segs, sizeof(*backup) * (size_t)n->seg_count);
+
+    int *is_vbus = (int *)malloc(sizeof(int) * (size_t)n->seg_count);
+    if (!is_vbus) { free(backup); return -1; }
+    for (int i = 0; i < n->seg_count; i++) {
+        const wire_segment_t *s = &n->segs[i];
+        is_vbus[i] = (s->a.x == s->b.x && s->a.x == column_x);
+    }
+
+    /* Apply: V bus segs shift both endpoints by delta in x; other segments
+       update only endpoints that land exactly at column_x. */
+    for (int i = 0; i < n->seg_count; i++) {
+        wire_segment_t *s = &n->segs[i];
+        if (is_vbus[i]) {
+            s->a.x += delta;
+            s->b.x += delta;
+        } else {
+            if (s->a.x == column_x) s->a.x += delta;
+            if (s->b.x == column_x) s->b.x += delta;
+        }
+    }
+
+    int ok = 1;
+    for (int i = 0; i < n->seg_count; i++) {
+        if (!segment_is_valid(&n->segs[i])) { ok = 0; break; }
+    }
+    if (!ok) {
+        memcpy(n->segs, backup, sizeof(*backup) * (size_t)n->seg_count);
+    }
+    free(is_vbus);
+    free(backup);
+    return ok ? 0 : -1;
+}
+
 int wire_geometry_junctions(const wire_net_geom_t *net,
                             vec2_t *out, int max_out) {
     if (!net || net->seg_count == 0 || !out || max_out <= 0) return 0;
