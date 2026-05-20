@@ -28,6 +28,8 @@ static int rl_key(igraph_key_t ik) {
         case IK_O: return KEY_O;
         case IK_R: return KEY_R;
         case IK_F: return KEY_F;
+        case IK_EQUAL: return KEY_EQUAL;
+        case IK_MINUS: return KEY_MINUS;
         case IK_ESCAPE:      return KEY_ESCAPE;
         case IK_DELETE:      return KEY_DELETE;
         case IK_TAB:         return KEY_TAB;

@@ -280,6 +280,13 @@ static void poll_global_shortcuts(dcs_app_t *app) {
         else       action_save   (app);
     }
     if (ctrl && g->key_pressed(g->self, IK_B)) action_toggle_display_mode(app);
+    /* Keyboard zoom — Ctrl+= (the '+' key without Shift) zooms in,
+       Ctrl+- zooms out. Mirrors the mouse-wheel zoom but focuses on
+       the current cam_offset (typically the canvas centre). */
+    if (ctrl && g->key_pressed(g->self, IK_EQUAL))
+        circuit_canvas_widget_zoom_in(app->circuit_canvas);
+    if (ctrl && g->key_pressed(g->self, IK_MINUS))
+        circuit_canvas_widget_zoom_out(app->circuit_canvas);
     /* non-Ctrl keyboard shortcuts intended for the canvas: */
     if (!ctrl) {
         if (g->key_pressed(g->self, IK_R)) on_run(shift ? 1 : 0, app);

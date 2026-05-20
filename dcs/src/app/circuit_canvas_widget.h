@@ -103,6 +103,14 @@ void circuit_canvas_widget_set_status_cb(circuit_canvas_widget_t *self,
                                          ccw_status_fn_t cb, void *user);
 void circuit_canvas_widget_fit_view    (circuit_canvas_widget_t *self);
 
+/* Keyboard-zoom helpers — bound to Ctrl+= and Ctrl+- in dcs_app. Multiply
+   cam_zoom by a fixed factor (one step ≈ 1.25× / 0.8×) and clamp to the
+   same [0.1, 5.0] range used by the mouse-wheel zoom. The zoom focuses
+   on whatever world point currently sits at cam_offset (typically the
+   canvas centre after fit_view). */
+void circuit_canvas_widget_zoom_in (circuit_canvas_widget_t *self);
+void circuit_canvas_widget_zoom_out(circuit_canvas_widget_t *self);
+
 /* Placement is armed by the side toolbar via this entry point. */
 void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t kind);
 

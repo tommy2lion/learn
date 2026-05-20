@@ -1461,6 +1461,16 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->we_hover_cursor = CURSOR_DEFAULT;
 }
 
+void circuit_canvas_widget_zoom_in(circuit_canvas_widget_t *self) {
+    self->cam_zoom *= 1.25f;
+    if (self->cam_zoom > 5.0f) self->cam_zoom = 5.0f;
+}
+
+void circuit_canvas_widget_zoom_out(circuit_canvas_widget_t *self) {
+    self->cam_zoom *= 0.8f;
+    if (self->cam_zoom < 0.1f) self->cam_zoom = 0.1f;
+}
+
 void circuit_canvas_widget_fit_view(circuit_canvas_widget_t *self) {
     rect_t b = self->base.bounds;
     self->cam_offset = (vec2_t){b.x + b.w * 0.5f, b.y + b.h * 0.5f};
