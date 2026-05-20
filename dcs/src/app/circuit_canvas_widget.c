@@ -266,6 +266,102 @@ static int seg_is_draggable(const circuit_canvas_widget_t *cw,
     return deg_a == 1 && deg_b == 1;
 }
 
+/* ── auto-alignment of components to trunks (R-7 refinement) ───────
+ *
+ * After auto_layout has placed components in topological columns, small
+ * pixel-level offsets between a producer's output pin and its consumer's
+ * input pin still produce ugly tiny V drops + H stubs in the routing.
+ * This pass snaps a component's y so one of its input pins lines up
+ * exactly with its producer's output pin, eliminating the dog-leg.
+ *
+ * Threshold: 8 px (= 1 grid step). Larger offsets are presumed
+ * intentional and left alone.
+ *
+ * For multi-input gates: align to the pin whose producer has the
+ * highest fan-out (more visual benefit), break ties by smaller |Δ|.
+ * Only one pin per component is aligned — snapping a 2-input gate to
+ * one input can worsen the other's offset, accepted trade-off.
+ *
+ * Cascade: components are processed in storage order (which is
+ * topological by construction in circuit_add_component). So aligning
+ * gate G to its already-aligned upstream gives G's downstream consumers
+ * a fresh, already-snapped y to align with.
+ *
+ * Runs only on initial seed (file open / set_circuit), not on drag-end
+ * reseats — otherwise the user's drag would snap-back. */
+
+#define AUTO_ALIGN_THRESHOLD 8.0f       /* matches wire_geometry's ROUTING_GRID */
+
+static int fanout_of_wire(const circuit_t *c, const char *wire_name) {
+    int n = 0;
+    for (int i = 0; i < c->component_count; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in; p++) {
+            if (strcmp(comp->in_wires[p], wire_name) == 0) n++;
+        }
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        if (strcmp(c->output_names[i], wire_name) == 0) n++;
+    }
+    return n;
+}
+
+static void auto_align_components_to_trunks(circuit_t *c) {
+    if (!c) return;
+
+    /* Pass 1 — shift components so one input pin aligns with its producer. */
+    for (int i = 0; i < c->component_count; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+
+        int   best_pin       = -1;
+        float best_delta     = 0;
+        int   best_fanout    = -1;
+        float best_abs_delta = AUTO_ALIGN_THRESHOLD + 1.0f;
+
+        for (int p = 0; p < n_in; p++) {
+            const char *wn = comp->in_wires[p];
+            if (!wn[0]) continue;
+            node_ref_t src = producer_for_wire(c, wn);
+            if (src.kind == NODE_NONE) continue;
+            float producer_y = node_output_pin(c, src).y;
+            float consumer_y = node_input_pin(c, (node_ref_t){NODE_COMPONENT, i}, p).y;
+            float delta = consumer_y - producer_y;
+            float abs_d = delta >= 0 ? delta : -delta;
+            if (abs_d == 0 || abs_d > AUTO_ALIGN_THRESHOLD) continue;
+            int fo = fanout_of_wire(c, wn);
+            /* Prefer higher fan-out; on tie, smaller |Δ|. */
+            if (fo > best_fanout
+                || (fo == best_fanout && abs_d < best_abs_delta)) {
+                best_pin       = p;
+                best_delta     = delta;
+                best_fanout    = fo;
+                best_abs_delta = abs_d;
+            }
+        }
+
+        if (best_pin >= 0) {
+            comp->position.y -= best_delta;
+        }
+    }
+
+    /* Pass 2 — same idea for external outputs (their producer is some
+       component / input we may have just moved). */
+    for (int i = 0; i < c->output_count; i++) {
+        const char *wn = c->output_names[i];
+        if (!wn[0]) continue;
+        node_ref_t src = producer_for_wire(c, wn);
+        if (src.kind == NODE_NONE) continue;
+        float producer_y = node_output_pin(c, src).y;
+        float consumer_y = c->output_positions[i].y;
+        float delta = consumer_y - producer_y;
+        float abs_d = delta >= 0 ? delta : -delta;
+        if (abs_d == 0 || abs_d > AUTO_ALIGN_THRESHOLD) continue;
+        c->output_positions[i].y -= delta;
+    }
+}
+
 /* (Re)build wire geometry from the current circuit's connectivity. Routes
    every (producer-output-pin → consumer-input-pin) pair via auto_route_wire,
    so fan-out nets accumulate one route per consumer in the same wire_net_geom_t.
@@ -1403,6 +1499,7 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
     wire_geometry_init(&cw->wires);
     if (c) {
         auto_layout(c);
+        auto_align_components_to_trunks(c);
         seed_geometry_from_circuit(cw);
         circuit_canvas_widget_fit_view(cw);
         cw->counter_in   = c->input_count;
@@ -1417,6 +1514,7 @@ void circuit_canvas_widget_set_circuit(circuit_canvas_widget_t *self, circuit_t 
     circuit_canvas_widget_reset(self);
     if (c) {
         auto_layout(c);
+        auto_align_components_to_trunks(c);
         seed_geometry_from_circuit(self);
         circuit_canvas_widget_fit_view(self);
         self->counter_in   = c->input_count;
