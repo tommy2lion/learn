@@ -75,6 +75,13 @@ class tagt_circuit_canvas_widget {
 
     /* Click-to-highlight: empty string = no highlight (Phase 6). */
     char highlighted_net[DOMAIN_NAME_LEN];
+
+    /* External (black-box) vs internal (schematic) view — Phase 8. The
+       display_name shows inside the box in external view; dcs_app sets
+       it to the file basename on load/new. Phase 9 will fold both fields
+       into a richer external_view_metadata_t. */
+    display_mode_t display_mode;
+    char           display_name[DOMAIN_NAME_LEN];
 };
 typedef class tagt_circuit_canvas_widget circuit_canvas_widget_t;
 
@@ -113,5 +120,18 @@ const wire_geometry_t *circuit_canvas_widget_geometry(const circuit_canvas_widge
    parsed # @wires block, overriding the seed-from-routing default. */
 void circuit_canvas_widget_load_geometry(circuit_canvas_widget_t *self,
                                          wire_geometry_t *src);
+
+/* Display mode (internal schematic vs. external black-box). The setter
+   is the one funnel called by every UI surface (menu, keyboard shortcut,
+   sidebar button) so a future fourth surface plugs in without
+   duplicating behaviour. (Phase 8) */
+display_mode_t circuit_canvas_widget_display_mode(const circuit_canvas_widget_t *self);
+void           circuit_canvas_widget_set_display_mode(circuit_canvas_widget_t *self,
+                                                      display_mode_t mode);
+
+/* Label shown inside the external-view box. Empty / NULL clears it.
+   dcs_app sets this to the file basename on load/new. (Phase 8) */
+void circuit_canvas_widget_set_display_name(circuit_canvas_widget_t *self,
+                                            const char *name);
 
 #endif /* DCS_APP_CIRCUIT_CANVAS_H */

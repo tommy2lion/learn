@@ -29,4 +29,11 @@ static inline int node_ref_eq(node_ref_t a, node_ref_t b) {
     return a.kind == b.kind && a.index == b.index;
 }
 
+/* Two views of the same circuit: the full internal schematic, or a
+   black-box rectangle exposing only the top-level I/O pins. (Phase 8) */
+typedef enum {
+    DISPLAY_INTERNAL = 0,
+    DISPLAY_EXTERNAL,
+} display_mode_t;
+
 #endif /* DCS_APP_EDITOR_STATE_H */

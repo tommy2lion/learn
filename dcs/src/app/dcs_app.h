@@ -35,6 +35,7 @@ class tagt_dcs_app {
     timing_canvas_widget_t  *timing_canvas;
     input_panel_t           *input_panel;
     menu_t                  *file_menu;
+    menu_t                  *view_menu;     /* Phase 8 — black-box toggle, etc. */
     label_t                 *status_label;
     divider_widget_t        *div_h;        /* between canvas + bottom panel */
     divider_widget_t        *div_v;        /* between sidebar + canvas      */

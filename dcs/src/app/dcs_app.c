@@ -33,6 +33,26 @@ static void on_canvas_status(const char *msg, void *user) {
     set_status((dcs_app_t *)user, "%s", msg);
 }
 
+/* Extract the file basename (no directory, no .dcs extension) and feed it
+   to the canvas for use as the external-view box label. (Phase 8) */
+static void apply_display_name_from_path(dcs_app_t *app, const char *path) {
+    if (!path || !path[0]) {
+        circuit_canvas_widget_set_display_name(app->circuit_canvas, "");
+        return;
+    }
+    const char *base = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+    char buf[DOMAIN_NAME_LEN];
+    snprintf(buf, sizeof(buf), "%s", base);
+    int n = (int)strlen(buf);
+    if (n >= 4 && strcmp(buf + n - 4, ".dcs") == 0) {
+        buf[n - 4] = '\0';
+    }
+    circuit_canvas_widget_set_display_name(app->circuit_canvas, buf);
+}
+
 /* ── file actions ────────────────────────────────────────────────── */
 
 static void load_circuit_from_text(dcs_app_t *app, const char *path, const char *text) {
@@ -60,6 +80,7 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
     input_panel_set_circuit(app->input_panel, c);
     snprintf(app->file_path, sizeof(app->file_path), "%s", path);
     app->path_is_explicit = 1;
+    apply_display_name_from_path(app, path);
     set_status(app, "Opened %s", path);
 }
 
@@ -70,6 +91,7 @@ static void action_new(dcs_app_t *app) {
     input_panel_set_circuit(app->input_panel, app->circuit);
     snprintf(app->file_path, sizeof(app->file_path), "untitled.dcs");
     app->path_is_explicit = 0;
+    apply_display_name_from_path(app, app->file_path);
     /* clear simulation results */
     simulation_release(&app->sim);
     simulation_init(&app->sim, app->circuit);
@@ -130,6 +152,21 @@ static void on_menu_select(int idx, void *user) {
     }
 }
 
+/* Toggle the canvas's display mode. Single funnel called by every UX
+   surface (menu, Ctrl+B, sidebar button); a future fourth surface plugs
+   in with no change. (Phase 8) */
+static void action_toggle_display_mode(dcs_app_t *app) {
+    display_mode_t cur = circuit_canvas_widget_display_mode(app->circuit_canvas);
+    display_mode_t next = (cur == DISPLAY_EXTERNAL) ? DISPLAY_INTERNAL : DISPLAY_EXTERNAL;
+    circuit_canvas_widget_set_display_mode(app->circuit_canvas, next);
+    set_status(app, next == DISPLAY_EXTERNAL ? "Black-box view" : "Schematic view");
+}
+
+static void on_view_menu_select(int idx, void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    if (idx == 0) action_toggle_display_mode(app);
+}
+
 /* ── run / sweep ─────────────────────────────────────────────────── */
 
 typedef struct tagt_stim_ctx { dcs_app_t *app; int sweep; } stim_ctx_t;
@@ -183,6 +220,7 @@ static void poll_global_shortcuts(dcs_app_t *app) {
         if (shift) action_save_as(app);
         else       action_save   (app);
     }
+    if (ctrl && g->key_pressed(g->self, IK_B)) action_toggle_display_mode(app);
     /* non-Ctrl keyboard shortcuts intended for the canvas: */
     if (!ctrl) {
         if (g->key_pressed(g->self, IK_R)) on_run(shift ? 1 : 0, app);
@@ -307,6 +345,11 @@ static void build_widgets(dcs_app_t *app) {
     menu_add_item(app->file_menu, "Save As...", "Ctrl+Shift+S");
     menu_set_on_select(app->file_menu, on_menu_select, app);
 
+    /* View menu — Phase 8 black-box toggle. Sits to the right of File. */
+    app->view_menu = menu_create((rect_t){92, 4, 80, 22}, "View");
+    menu_add_item(app->view_menu, "Toggle black-box view", "Ctrl+B");
+    menu_set_on_select(app->view_menu, on_view_menu_select, app);
+
     /* Status label */
     app->status_label = label_create((rect_t){0, sh - STATUS_H, sw, STATUS_H},
                                      "", 14, 0xC8C8C8FFu);
@@ -328,6 +371,7 @@ static void build_widgets(dcs_app_t *app) {
     panel_add_child(app->root, &app->div_v->base);
     panel_add_child(app->root, &app->status_label->base);
     panel_add_child(app->root, &app->file_menu->base);
+    panel_add_child(app->root, &app->view_menu->base);
 
     relayout(app, sw, sh);   /* sets divider bounds + ranges */
 }

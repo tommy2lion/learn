@@ -22,6 +22,7 @@ static Color rgba_to_color(uint32_t c) {
 static int rl_key(igraph_key_t ik) {
     switch (ik) {
         case IK_A: return KEY_A;
+        case IK_B: return KEY_B;
         case IK_S: return KEY_S;
         case IK_N: return KEY_N;
         case IK_O: return KEY_O;

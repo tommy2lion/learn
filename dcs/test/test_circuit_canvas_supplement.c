@@ -13,8 +13,10 @@
 #include "../src/domain/circuit.h"
 #include "../src/domain/component.h"
 #include "../src/framework/widgets/widget.h"
+#include "../src/framework/graphics/igraph.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static int failures = 0, total = 0;
 
@@ -22,6 +24,96 @@ static void check(const char *name, int cond) {
     total++;
     printf("%s  %s\n", cond ? "PASS" : "FAIL", name);
     if (!cond) failures++;
+}
+
+/* ── mock igraph for Phase 8 render-dispatch test ──────────────────
+ *
+ * Records the count of each primitive call and the strings passed to
+ * draw_text so the test can verify that the EXTERNAL view path was
+ * reached. Stubs every other function in the igraph interface so the
+ * canvas's drawing code doesn't dereference NULLs. */
+
+typedef struct {
+    int n_rect, n_rect_lines, n_line, n_circle, n_circle_lines, n_text;
+    int saw_display_name;     /* 1 if draw_text was called with "TestBox" */
+} mock_counts_t;
+
+#define MOCK_NAME_TARGET "TestBox"
+
+static void mk_draw_rect(void *self, rect_t r, uint32_t color) {
+    (void)r; (void)color;
+    ((mock_counts_t *)self)->n_rect++;
+}
+static void mk_draw_rect_lines(void *self, rect_t r, float th, uint32_t color) {
+    (void)r; (void)th; (void)color;
+    ((mock_counts_t *)self)->n_rect_lines++;
+}
+static void mk_draw_line(void *self, vec2_t a, vec2_t b, float th, uint32_t color) {
+    (void)a; (void)b; (void)th; (void)color;
+    ((mock_counts_t *)self)->n_line++;
+}
+static void mk_draw_circle(void *self, vec2_t c, float r, uint32_t color) {
+    (void)c; (void)r; (void)color;
+    ((mock_counts_t *)self)->n_circle++;
+}
+static void mk_draw_circle_lines(void *self, vec2_t c, float r, float th, uint32_t color) {
+    (void)c; (void)r; (void)th; (void)color;
+    ((mock_counts_t *)self)->n_circle_lines++;
+}
+static void mk_draw_text(void *self, const char *s, vec2_t p, float size, uint32_t color) {
+    (void)p; (void)size; (void)color;
+    mock_counts_t *m = (mock_counts_t *)self;
+    m->n_text++;
+    if (s && strcmp(s, MOCK_NAME_TARGET) == 0) m->saw_display_name = 1;
+}
+static float  mk_measure_text(void *self, const char *s, float size) {
+    (void)self; (void)size;
+    return (float)((s ? (int)strlen(s) : 0) * 8);   /* rough estimate */
+}
+static vec2_t mk_mouse_position(void *self) { (void)self; return (vec2_t){0, 0}; }
+static vec2_t mk_mouse_delta   (void *self) { (void)self; return (vec2_t){0, 0}; }
+static int    mk_mouse_down    (void *self, igraph_mouse_btn_t b) { (void)self; (void)b; return 0; }
+static int    mk_mouse_pressed (void *self, igraph_mouse_btn_t b) { (void)self; (void)b; return 0; }
+static int    mk_mouse_released(void *self, igraph_mouse_btn_t b) { (void)self; (void)b; return 0; }
+static float  mk_mouse_wheel   (void *self) { (void)self; return 0.0f; }
+static int    mk_key_down      (void *self, igraph_key_t k) { (void)self; (void)k; return 0; }
+static int    mk_key_pressed   (void *self, igraph_key_t k) { (void)self; (void)k; return 0; }
+static void   mk_push_camera2d (void *self, vec2_t t, vec2_t o, float z) {
+    (void)self; (void)t; (void)o; (void)z;
+}
+static void   mk_pop_camera2d  (void *self) { (void)self; }
+static vec2_t mk_screen_to_world(void *self, vec2_t s) { (void)self; return s; }
+static vec2_t mk_world_to_screen(void *self, vec2_t s) { (void)self; return s; }
+static void   mk_push_scissor  (void *self, rect_t r) { (void)self; (void)r; }
+static void   mk_pop_scissor   (void *self) { (void)self; }
+static void   mk_set_cursor    (void *self, cursor_kind_t k) { (void)self; (void)k; }
+
+static void mock_igraph_init(igraph_t *g, mock_counts_t *m) {
+    memset(g, 0, sizeof(*g));
+    memset(m, 0, sizeof(*m));
+    g->self            = m;
+    g->draw_rect       = mk_draw_rect;
+    g->draw_rect_lines = mk_draw_rect_lines;
+    g->draw_line       = mk_draw_line;
+    g->draw_circle     = mk_draw_circle;
+    g->draw_circle_lines = mk_draw_circle_lines;
+    g->draw_text       = mk_draw_text;
+    g->measure_text    = mk_measure_text;
+    g->mouse_position  = mk_mouse_position;
+    g->mouse_delta     = mk_mouse_delta;
+    g->mouse_down      = mk_mouse_down;
+    g->mouse_pressed   = mk_mouse_pressed;
+    g->mouse_released  = mk_mouse_released;
+    g->mouse_wheel     = mk_mouse_wheel;
+    g->key_down        = mk_key_down;
+    g->key_pressed     = mk_key_pressed;
+    g->push_camera2d   = mk_push_camera2d;
+    g->pop_camera2d    = mk_pop_camera2d;
+    g->screen_to_world = mk_screen_to_world;
+    g->world_to_screen = mk_world_to_screen;
+    g->push_scissor    = mk_push_scissor;
+    g->pop_scissor     = mk_pop_scissor;
+    g->set_cursor      = mk_set_cursor;
 }
 
 /* Build: inputs A, B; output Y; component g1 = and(A, B); Y consumes g1.
@@ -278,6 +370,123 @@ int main(void) {
         check("second click on net B: highlight switched",
               strcmp(cw->highlighted_net, "B") == 0);
 
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 8 — display_mode state machine + render dispatch
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── default mode is INTERNAL; set/get round-trip ─────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        check("create: display_mode defaults to INTERNAL",
+              circuit_canvas_widget_display_mode(cw) == DISPLAY_INTERNAL);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+        check("set EXTERNAL: getter returns EXTERNAL",
+              circuit_canvas_widget_display_mode(cw) == DISPLAY_EXTERNAL);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_INTERNAL);
+        check("set INTERNAL: getter returns INTERNAL",
+              circuit_canvas_widget_display_mode(cw) == DISPLAY_INTERNAL);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── set_circuit / reset clears display_mode back to INTERNAL ─── */
+    {
+        circuit_t *c1 = make_simple_circuit();
+        circuit_t *c2 = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c1);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+        circuit_canvas_widget_set_circuit(cw, c2);
+        check("set_circuit resets display_mode to INTERNAL",
+              circuit_canvas_widget_display_mode(cw) == DISPLAY_INTERNAL);
+        widget_destroy(&cw->base);
+        circuit_destroy(c1);
+        circuit_destroy(c2);
+    }
+
+    /* ── set_display_name: store / clear ──────────────────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        check("display_name starts empty",  cw->display_name[0] == '\0');
+        circuit_canvas_widget_set_display_name(cw, "MyCircuit");
+        check("display_name stored",
+              strcmp(cw->display_name, "MyCircuit") == 0);
+        circuit_canvas_widget_set_display_name(cw, NULL);
+        check("display_name cleared (NULL)", cw->display_name[0] == '\0');
+        circuit_canvas_widget_set_display_name(cw, "");
+        check("display_name cleared (empty)", cw->display_name[0] == '\0');
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── render dispatch: EXTERNAL draws box+name, INTERNAL doesn't ── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        circuit_canvas_widget_set_display_name(cw, MOCK_NAME_TARGET);
+
+        igraph_t mock_g;
+        mock_counts_t counts;
+
+        /* INTERNAL: many lines (wire segments), no "TestBox" string. */
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        int internal_lines = counts.n_line;
+        int internal_saw_name = counts.saw_display_name;
+
+        /* EXTERNAL: box rectangle, display_name text, pin stubs only. */
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        int external_lines = counts.n_line;
+        int external_saw_name = counts.saw_display_name;
+
+        check("INTERNAL: many draw_line calls (wire segments)",
+              internal_lines >= 3);
+        check("INTERNAL: display_name NOT drawn",
+              internal_saw_name == 0);
+        check("EXTERNAL: display_name drawn",
+              external_saw_name == 1);
+        check("EXTERNAL: line count is just pin stubs (n_in + n_out)",
+              external_lines == c->input_count + c->output_count);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── event short-circuit: clicks in EXTERNAL mode don't mutate state ─ */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        cw->cam_target = (vec2_t){0, 0};
+        cw->cam_offset = (vec2_t){0, 0};
+        cw->cam_zoom   = 1.0f;
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+
+        int comp_count_before = c->component_count;
+        canvas_mode_t mode_before = cw->mode;
+
+        event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind      = EV_MOUSE_PRESS;
+        ev.mouse.btn = IM_LEFT;
+        ev.mouse.pos = (vec2_t){280, 280};   /* where g1 sits in INTERNAL */
+        widget_handle_event(&cw->base, &ev);
+
+        check("EXTERNAL: clicking on schematic-only coords doesn't change mode",
+              cw->mode == mode_before);
+        check("EXTERNAL: click does not delete / add components",
+              c->component_count == comp_count_before);
         widget_destroy(&cw->base);
         circuit_destroy(c);
     }

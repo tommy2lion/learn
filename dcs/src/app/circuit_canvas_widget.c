@@ -1,4 +1,5 @@
 #include "circuit_canvas_widget.h"
+#include "external_view.h"
 #include "../framework/core/color.h"
 #include <stdlib.h>
 #include <string.h>
@@ -881,9 +882,15 @@ static void ccw_draw(widget_t *self, igraph_t *g) {
     g->draw_rect_lines(g->self, self->bounds, 1.0f, COLOR_LIGHTGRAY);
 
     g->push_scissor(g->self, self->bounds);
-    g->push_camera2d(g->self, cw->cam_target, cw->cam_offset, cw->cam_zoom);
-    draw_world(cw, g);
-    g->pop_camera2d(g->self);
+    if (cw->display_mode == DISPLAY_EXTERNAL && cw->circuit) {
+        /* Black-box view: no camera transform, draw centered in viewport.
+           Phase 9 will route through the metadata struct + render hook. */
+        external_view_draw_default(g, cw->circuit, cw->display_name, self->bounds);
+    } else {
+        g->push_camera2d(g->self, cw->cam_target, cw->cam_offset, cw->cam_zoom);
+        draw_world(cw, g);
+        g->pop_camera2d(g->self);
+    }
     g->pop_scissor(g->self);
 }
 
@@ -891,6 +898,19 @@ static void ccw_draw(widget_t *self, igraph_t *g) {
 
 static int ccw_handle_event(widget_t *self, const event_t *ev) {
     circuit_canvas_widget_t *cw = (circuit_canvas_widget_t *)self;
+
+    /* External (black-box) view: schematic-level interactions don't make
+       sense without internal nodes / wires on screen. Consume mouse events
+       (so they don't fall through to underlying widgets) but do nothing.
+       Pan polling lives in ccw_draw and continues to work via mouse_down. */
+    if (cw->display_mode == DISPLAY_EXTERNAL) {
+        return (ev->kind == EV_MOUSE_PRESS  ||
+                ev->kind == EV_MOUSE_RELEASE ||
+                ev->kind == EV_MOUSE_MOVE   ||
+                ev->kind == EV_MOUSE_WHEEL  ||
+                ev->kind == EV_KEY_PRESS) ? 1 : 0;
+    }
+
     vec2_t world = screen_to_world(cw, ev->mouse.pos);
 
     /* refresh hover on every mouse move; while dragging, move the dragged
@@ -1207,6 +1227,24 @@ void circuit_canvas_widget_load_geometry(circuit_canvas_widget_t *self,
     assert_geometry_consistent(self);
 }
 
+display_mode_t circuit_canvas_widget_display_mode(const circuit_canvas_widget_t *self) {
+    return self->display_mode;
+}
+
+void circuit_canvas_widget_set_display_mode(circuit_canvas_widget_t *self,
+                                            display_mode_t mode) {
+    self->display_mode = mode;
+}
+
+void circuit_canvas_widget_set_display_name(circuit_canvas_widget_t *self,
+                                            const char *name) {
+    if (!name || !name[0]) {
+        self->display_name[0] = '\0';
+        return;
+    }
+    snprintf(self->display_name, DOMAIN_NAME_LEN, "%s", name);
+}
+
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->mode = CMODE_IDLE;
     self->place_kind = PLACE_NONE;
@@ -1219,6 +1257,8 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->counter_out = 0;
     self->counter_gate = 0;
     self->highlighted_net[0] = '\0';
+    self->display_mode = DISPLAY_INTERNAL;
+    self->display_name[0] = '\0';
 }
 
 void circuit_canvas_widget_fit_view(circuit_canvas_widget_t *self) {

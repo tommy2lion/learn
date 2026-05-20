@@ -9,6 +9,8 @@
 #define HPAD          12     /* horizontal padding inside the sidebar */
 #define BTN_H         40
 #define BTN_FONT      15
+#define VIEW_BTN_H    32     /* the black-box-toggle row at the bottom */
+#define VIEW_BTN_PAD  10     /* gap above the toggle button             */
 
 typedef struct tagt_stb_item { float y; const char *label; place_kind_t kind; } stb_item_t;
 
@@ -29,6 +31,18 @@ static rect_t item_rect(const widget_t *self, int i) {
         self->bounds.y + ITEMS[i].y,
         self->bounds.w - 2 * HPAD,
         BTN_H,
+    };
+}
+
+/* The black-box-view toggle button sits at the bottom of the toolbar
+   regardless of how tall the sidebar is — so it doesn't get hidden
+   when the panel is short. (Phase 8) */
+static rect_t view_btn_rect(const widget_t *self) {
+    return (rect_t){
+        self->bounds.x + HPAD,
+        self->bounds.y + self->bounds.h - VIEW_BTN_PAD - VIEW_BTN_H,
+        self->bounds.w - 2 * HPAD,
+        VIEW_BTN_H,
     };
 }
 
@@ -66,6 +80,26 @@ static void stb_draw(widget_t *self, igraph_t *g) {
                               r.y + (r.h - BTN_FONT) * 0.5f},
                      BTN_FONT, COLOR_WHITE);
     }
+
+    /* Black-box / schematic toggle (Phase 8). Label shows the CURRENT mode
+       with a square-bracket marker; the background turns blue when active
+       (external view) so the user has an at-a-glance state indicator. */
+    if (st->target) {
+        rect_t r = view_btn_rect(self);
+        int external = (st->target->display_mode == DISPLAY_EXTERNAL);
+        uint32_t bg = external         ? 0x5082B4FFu
+                    : hits_rect(r, mp) ? 0x64646EFFu
+                                       : 0x50505AFFu;
+        g->draw_rect      (g->self, r, bg);
+        g->draw_rect_lines(g->self, r, 1, COLOR_LIGHTGRAY);
+        const char *label = external ? "[\xe2\x96\xa0] BLACK-BOX"
+                                     : "[ ] BLACK-BOX";
+        float ltw = g->measure_text(g->self, label, BTN_FONT);
+        g->draw_text(g->self, label,
+                     (vec2_t){r.x + (r.w - ltw) * 0.5f,
+                              r.y + (r.h - BTN_FONT) * 0.5f},
+                     BTN_FONT, COLOR_WHITE);
+    }
 }
 
 static int stb_handle_event(widget_t *self, const event_t *ev) {
@@ -83,6 +117,13 @@ static int stb_handle_event(widget_t *self, const event_t *ev) {
         } else {
             circuit_canvas_widget_arm_place(st->target, ITEMS[i].kind);
         }
+        return 1;
+    }
+    /* Black-box toggle row (Phase 8). */
+    if (st->target && hits_rect(view_btn_rect(self), p)) {
+        display_mode_t cur = circuit_canvas_widget_display_mode(st->target);
+        circuit_canvas_widget_set_display_mode(st->target,
+            cur == DISPLAY_EXTERNAL ? DISPLAY_INTERNAL : DISPLAY_EXTERNAL);
         return 1;
     }
     return 1;

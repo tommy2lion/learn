@@ -13,7 +13,7 @@
 
 typedef enum {
     IK_NONE = 0,
-    IK_A, IK_S, IK_N, IK_O, IK_R, IK_F,         /* alphabetic keys we use   */
+    IK_A, IK_B, IK_S, IK_N, IK_O, IK_R, IK_F,   /* alphabetic keys we use   */
     IK_ESCAPE, IK_DELETE, IK_TAB, IK_ENTER,
     IK_LEFT_CTRL, IK_RIGHT_CTRL,
     IK_LEFT_SHIFT, IK_RIGHT_SHIFT,
