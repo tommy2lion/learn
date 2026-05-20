@@ -457,6 +457,314 @@ flip-flops introduce the need for proper feedback handling).
 
 ---
 
+## R-10 — Window title shows current file ⏸
+
+**Observation (user, after Phase 13 review).** The GUI window title
+is currently fixed to `"DCS"`. It should show the file the user is
+editing so the OS taskbar / Alt-Tab list distinguishes multiple DCS
+instances.
+
+**Proposal.**
+
+- Default title: `"DCS — <basename>"`, e.g. `DCS — my_test.dcs`.
+- Configurable variant: full path `DCS — C:\path\to\my_test.dcs`
+  (a View-menu / settings toggle).
+- New file: `"DCS — untitled.dcs"`.
+- Dirty-state marker (industry convention): `"DCS — my_test.dcs *"`
+  when there are unsaved changes. Ties into R-11.
+- Update on every file open / new / save-as / mutation.
+
+**Implementation impact.**
+
+- `iplatform_t` gains a `set_window_title(self, const char *title)`
+  method. raylib backend already has `SetWindowTitle`; Win32 stub
+  trivial.
+- `dcs_app` tracks a `dirty` flag (also needed for R-11) and
+  refreshes the title on every relevant transition (set on any
+  mutation; cleared on save).
+
+**Scope.** Small — one iplatform method + a couple of call sites.
+
+---
+
+## R-11 — Save-on-close prompt ⏸
+
+**Observation.** Closing the window with unsaved changes silently
+discards them. Users coming from any modern editor expect a
+"Save changes to `<file>`?" prompt.
+
+**Proposal.**
+
+1. Track a `dirty` flag in `dcs_app_t`. Flip to `true` on any
+   mutation (place, connect, disconnect, drag, delete, wire-edit);
+   flip back to `false` on successful save.
+2. Hook the `quit_manager`'s on_attempt_quit callback (already in
+   the framework). When fired:
+   - If `dirty == false`: allow quit.
+   - Else: show a modal **`[Save] [Don't Save] [Cancel]`** dialog.
+     - **Save**: run `action_save` (or `action_save_as` if no
+       explicit path), then proceed to quit on success.
+     - **Don't Save**: proceed to quit.
+     - **Cancel**: abort the quit.
+3. Add Win-X-button handling — raylib's `WindowShouldClose` already
+   reports this; just route it through the same prompt path.
+
+**Implementation impact.** New `iplatform_t.show_message_box(self,
+title, msg, buttons[])` method returning the chosen button index.
+Win32: `MessageBoxA`; Linux: zenity or stub. Pairs with R-10's
+dirty-flag tracking.
+
+**Scope.** Small–medium — the iplatform method + the prompt flow +
+wiring dirty/clean through mutations and save.
+
+---
+
+## R-12 — `Ctrl+A` to select all components ⏸
+
+**Observation.** No "select all" shortcut exists today. Multi-select
+requires marquee-drag, which is fiddly on large schematics.
+
+**Proposal.** In `poll_global_shortcuts`, on `Ctrl+A`: clear the
+current selection, then add every component + every input + every
+output to the canvas's selection set. Cursor stays where it was.
+Pairs with R-13 (Del to delete all selected) for fast cleanup.
+
+**Implementation impact.** A handful of lines in
+`poll_global_shortcuts` + a `circuit_canvas_widget_select_all()`
+helper that iterates the circuit's nodes.
+
+**Scope.** Trivial — ~10 lines + a unit test.
+
+---
+
+## R-13 — `Del` key deletes the current selection ⏸
+
+**Observation.** Right-click deletes one node at a time; `Del`
+should delete the entire current selection in one step. The
+keymap has `IK_DELETE` already wired into igraph but no handler
+fires.
+
+**Proposal.** In `ccw_handle_event` (CMODE_IDLE branch), on
+`EV_KEY_PRESS` with `IK_DELETE`: call the existing
+`remove_selection(cw)`. Same code path as the right-click cascade,
+just keyboard-triggered.
+
+**Implementation impact.** A few lines in the canvas widget's
+event handler. The deletion machinery already exists (Phase 4).
+
+**Scope.** Trivial — ~5 lines + an integration test.
+
+---
+
+## R-14 — Help menu + `F1` help dialog ⏸
+
+**Observation.** Mouse and keyboard shortcuts aren't discoverable.
+New users have to read the source.
+
+**Proposal.** Add a **Help** menu next to View, and bind `F1` to
+open a modal help dialog. Content (a single static text block,
+no interactivity):
+
+```
+DCS — keyboard & mouse reference
+
+Files
+  Ctrl+N           New circuit
+  Ctrl+O           Open .dcs file
+  Ctrl+S           Save
+  Ctrl+Shift+S     Save As
+  Ctrl+Q           Quit (will prompt if unsaved)
+
+View
+  Ctrl+B           Toggle black-box / schematic view
+  Ctrl+=           Zoom in
+  Ctrl+-           Zoom out
+  F                Fit view
+
+Edit
+  Ctrl+A           Select all
+  Del              Delete selection
+  Ctrl+Z / Ctrl+Y  Undo / Redo  (planned — see R-5)
+  ESC              Cancel current mode
+
+Simulation
+  R                Run once
+  Shift+R          Sweep all input combinations
+
+Mouse
+  Wheel            Zoom (centred on cursor)
+  Middle drag      Pan
+  Left on pin      Start wiring
+  Left on node     Select + drag
+  Left on wire     Highlight whole net
+  Left on V bus    Drag the bus column
+  Right on node    Delete one node
+  Right on wire    Disconnect
+```
+
+**Implementation impact.** New `help_widget` (or reuse `label_t`
+with a scrolled background). Modal behaviour (consume all events
+until closed). Menu wiring + `F1` shortcut in
+`poll_global_shortcuts`.
+
+**Scope.** Small — mostly UI plumbing for the modal widget.
+
+---
+
+## R-15 — Version system (`version.c` + generated `build_info.c`) ⏸
+
+**Observation (user).** DCS has no version reporting. The user
+wants a structured version like
+`DCS version 1.0.0:20260512:71ed6c30:<hash>`, displayed in the
+GUI About menu and the CLI `--version` flag.
+
+**Proposal.**
+
+1. Hand-maintained `src/version.h` (under git):
+   ```c
+   #define DCS_VERSION_MAJOR  1
+   #define DCS_VERSION_MINOR  0
+   #define DCS_VERSION_PATCH  0
+   #define DCS_VERSION_STR    "1.0.0"
+   ```
+
+2. `src/build_info.c` — **not** under git, regenerated by every
+   `make`. A small shell snippet in the Makefile writes it:
+   ```sh
+   BUILD_TIME=$(date +%Y%m%d-%H%M%S)
+   GIT_COMMIT=$(git rev-parse --short=8 HEAD)
+   SIG=$(printf "%s%s%s%s" "$DCS_VERSION_STR" "$BUILD_TIME" \
+         "$GIT_COMMIT" "$DCS_BUILD_SALT" | sha256sum | head -c 16)
+   ```
+   Emits:
+   ```c
+   const char *dcs_build_time   = "20260512-153045";
+   const char *dcs_git_commit   = "71ed6c30";
+   const char *dcs_build_sig    = "a3f7c2e1b8d04956";
+   ```
+
+3. Version string printed via a helper:
+   `DCS 1.0.0:20260512:71ed6c30:a3f7c2e1b8d04956`.
+
+4. Surfaces:
+   - GUI Help → About → modal showing the full string.
+   - `dcs_cli.exe --version` → prints to stdout.
+
+**Tamper-protection suggestion (user's "selfdefine-hash-value"
+question).** The user wants to verify the binary hasn't been
+modified after build.
+
+A practical lightweight scheme:
+
+- **Build time.** `make` reads `DCS_BUILD_SALT` from an environment
+  variable (kept out of the repo) and computes
+  `sig = SHA256(version || build_time || git_commit || SALT)`.
+  Embeds `sig` in `build_info.c`.
+- **Run time.** The binary recomputes the same hash from its own
+  baked-in `version`, `build_time`, `git_commit`, and the SALT
+  (also baked in as a `static const char` in the binary). On
+  mismatch, refuse to run or flag the version as "unverified".
+
+**The critical limitation, said plainly.** The salt is **inside**
+the binary. Anyone with a hex editor and the algorithm can extract
+the salt and forge a valid signature for a modified binary. This
+buys you protection against **casual tampering** (someone patching
+a string in the binary) but **nothing** against a determined
+attacker.
+
+For real cryptographic integrity:
+- **Code signing** (Authenticode on Windows, `codesign` on macOS,
+  detached signatures on Linux). Relies on a trusted CA chain;
+  cannot be forged without the private key. The right answer for
+  production binaries.
+- **Server-side license verification** (online activation /
+  periodic phone-home). Practical for SaaS-style products; adds
+  network dependency.
+
+My recommendation: implement the SHA-256+salt scheme as the
+**default**; document its limitations in the code; treat real
+code signing as a production-readiness milestone separate from
+this refinement.
+
+**Scope.** Small — one header, one Makefile rule, one runtime
+helper, two surface integrations (GUI About + CLI flag).
+
+---
+
+## R-16 — Rich CLI `--help` so AI tools can generate `.dcs` files ⏸
+
+**Observation (user).** AI tools (Claude, ChatGPT, etc.) can
+generate `.dcs` files if they understand the format. Today's
+`dcs_cli.exe --help` is terse — not enough for an AI to confidently
+synthesise circuits.
+
+**Proposal.** Expand `--help` to include:
+
+- **File format spec** — `inputs:` / `outputs:` lines, gate
+  expressions, all available gate kinds, the `# @layout` /
+  `# @wires` / `# @display_mode` / `# @display_name` /
+  `# @pin_style` annotations.
+- **Worked examples** — a half-adder, a 2:1 mux, a D flip-flop
+  *stub* (real D-FF deferred per R-4) — full text the AI can
+  pattern-match against.
+- **Constraints** — `DOMAIN_MAX_PINS_IN = 2`, no feedback today
+  (R-9), wire-name uniqueness, etc.
+
+**Implementation impact.** Just a longer help string in
+`cli/main.c`. Maybe split into `--help` (brief) and
+`--help-format` (full spec) so the brief version stays scannable.
+
+**Scope.** Trivial — one big string block + a flag.
+
+**Connection to R-17.** R-16 lets an AI generate text files; R-17
+lets the GUI auto-open them.
+
+---
+
+## R-17 — GUI HTTP endpoint for AI-driven workflows ⏸
+
+**Observation (user, explicitly tagged "Step 3 or even Step 4").**
+Once R-16 lets AI tools generate `.dcs` files, the next step is
+closing the loop: the AI generates → DCS GUI auto-opens →
+auto-lays-out → user reviews → saves. Today the loop has manual
+steps (the user invokes the AI, saves the file, opens it in the
+GUI separately).
+
+**Proposal sketch.**
+
+Option A — local HTTP server inside `dcs_gui.exe`:
+- Listens on `http://localhost:<port>` for `POST /open` with
+  `.dcs` text in the body.
+- On receipt: parse → auto_layout + auto_align → open in the
+  active tab (or new tab when multi-tab lands) → respond OK.
+- AI tool issues a single HTTP POST after generating; the GUI
+  picks it up live.
+
+Option B — filesystem watcher:
+- DCS GUI watches a configured directory for new `.dcs` files.
+- AI writes to the directory → GUI picks up automatically.
+- Simpler than HTTP; no port management.
+
+Option C — IPC named pipe:
+- Cross-platform alternative; matches the `imessage_t` interface
+  CLAUDE.md §11.3 already sketches for future multi-process work.
+
+**Security considerations.** Any of these means the GUI accepts
+input from an external process. Mitigations:
+
+- HTTP option: bind to `127.0.0.1` only, never `0.0.0.0`. Optional
+  token auth.
+- Filesystem option: restrict to a single configured directory
+  (not arbitrary paths).
+- Token-protect all options for multi-user systems.
+
+**Scope.** Medium — moderate code (HTTP/IPC machinery + concurrency
+handling on the GUI side) plus a careful security review.
+Genuinely Step 3 or 4 work; recorded here so the idea isn't
+forgotten.
+
+---
+
 ## Post-Phase-13 implementation work
 
 After the implementation plan's final stretch phase landed
