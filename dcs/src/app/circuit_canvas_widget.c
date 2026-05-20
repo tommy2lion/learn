@@ -720,16 +720,18 @@ static void draw_node(igraph_t *g, const circuit_t *c, node_ref_t r, int hovered
         } else {
             g->draw_rect      (g->self, box, COLOR_WHITE);
             g->draw_rect_lines(g->self, box, 2.0f, COLOR_BLACK);
-            /* IEC glyph: '&' for AND, '≥1' for OR. Fallback to the kind name
-               (uppercase) for unknown kinds — chipsets / future primitives.
-               If the runtime font lacks '≥' the OR gate will show a tofu
-               box; switch to "OR" if that becomes a problem. */
+            /* IEC-style glyph for AND ('&'). For OR we'd ideally use '≥1'
+               but raylib's default font renders the ≥ (U+2265) as a tofu
+               '?'; using the ASCII "OR" keeps the look consistent across
+               platforms. Switch back to "\xe2\x89\xa5""1" when a font
+               with the IEC glyph is in use. Unknown kinds fall back to
+               the uppercased kind name (chipsets / future primitives). */
             const char *glyph;
             float       glyph_size;
             char        fallback[8] = {0};
             switch (kind) {
                 case COMP_AND: glyph = "&";                    glyph_size = 22.0f; break;
-                case COMP_OR:  glyph = "\xe2\x89\xa5""1";      glyph_size = 18.0f; break;
+                case COMP_OR:  glyph = "OR";                   glyph_size = 18.0f; break;
                 default: {
                     const char *kn = component_kind_name(kind);
                     for (int i = 0; kn[i] && i < 7; i++)
