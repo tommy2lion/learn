@@ -141,4 +141,21 @@ int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
 int auto_route_wire(wire_geometry_t *self, const char *wire_name,
                     vec2_t producer_pin, vec2_t consumer_pin);
 
+/* Route a whole net at once using a Steiner-trunk topology:
+   - For n == 0 the net is removed.
+   - For n == 1 it falls back to auto_route_wire (a Z-route or straight
+     line, identical to the previous per-consumer behaviour).
+   - For n >= 2 it emits a horizontal trunk at producer_pin.y spanning
+     [min, max] of {producer.x, consumers[].x}, split into pieces at
+     every unique x so each drop's top sits on a trunk-segment endpoint
+     (which makes the junction-dot derivation pick up T-joins
+     automatically). One vertical drop per consumer whose y differs
+     from producer.y completes the route.
+
+   Replaces any existing geometry for `wire_name`. Returns 0 on success,
+   -1 on invalid input or allocation failure. (Phase 13 — Steiner trunks) */
+int auto_route_net(wire_geometry_t *self, const char *wire_name,
+                   vec2_t producer_pin,
+                   const vec2_t *consumers, int n);
+
 #endif /* DCS_APP_WIRE_GEOMETRY_H */

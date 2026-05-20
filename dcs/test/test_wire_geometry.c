@@ -929,6 +929,145 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 13 — Steiner-trunk router (auto_route_net)
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── n=0 removes the net ──────────────────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        wire_geometry_get_or_create(&g, "ghost");
+        check("setup: net ghost exists", wire_geometry_find(&g, "ghost") >= 0);
+        vec2_t prod; prod.x = 0; prod.y = 0;
+        check("auto_route_net(n=0) returns 0",
+              auto_route_net(&g, "ghost", prod, NULL, 0) == 0);
+        check("net ghost removed", wire_geometry_find(&g, "ghost") == -1);
+        wire_geometry_release(&g);
+    }
+
+    /* ── n=1 falls back to Z-router ───────────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 0;
+        vec2_t cs[1];
+        cs[0].x = 160; cs[0].y = 40;
+        check("auto_route_net(n=1) returns 0",
+              auto_route_net(&g, "n", prod, cs, 1) == 0);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "n"));
+        check("n=1: 3 segments (Z-route)",
+              net && net->seg_count == 3);
+        wire_geometry_release(&g);
+    }
+
+    /* ── n=2 fan-out: trunk split + drops ─────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        check("auto_route_net(n=2) returns 0",
+              auto_route_net(&g, "fan2", prod, cs, 2) == 0);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "fan2"));
+        check("n=2: 4 segments (2 trunk H + 2 V drops)",
+              net && net->seg_count == 4);
+        /* First trunk seg: (0, 100) → (200, 100); second: (200, 100) → (300, 100). */
+        check("trunk seg 0 endpoints",
+              net && net->segs[0].a.x == 0 && net->segs[0].a.y == 100
+                  && net->segs[0].b.x == 200 && net->segs[0].b.y == 100);
+        check("trunk seg 1 endpoints",
+              net && net->segs[1].a.x == 200 && net->segs[1].b.x == 300
+                  && net->segs[1].a.y == 100 && net->segs[1].b.y == 100);
+        /* Drops are appended after trunk in input order: drop 0 at x=200, drop 1 at x=300. */
+        check("drop 0 endpoints (x=200)",
+              net && net->segs[2].a.x == 200 && net->segs[2].a.y == 100
+                  && net->segs[2].b.x == 200 && net->segs[2].b.y == 50);
+        check("drop 1 endpoints (x=300)",
+              net && net->segs[3].a.x == 300 && net->segs[3].a.y == 100
+                  && net->segs[3].b.x == 300 && net->segs[3].b.y == 150);
+        wire_geometry_release(&g);
+    }
+
+    /* ── junction dot derivation picks up T-joins automatically ───── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y = 200;
+        cs[1].x = 300; cs[1].y = 200;
+        auto_route_net(&g, "j", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "j"));
+        vec2_t junctions[8];
+        int nj = wire_geometry_junctions(net, junctions, 8);
+        /* (200, 100) is degree-3: end of trunk seg 0, start of trunk seg 1,
+           top of drop 0. Junction dot expected. */
+        check("Steiner: 1 junction at interior trunk break", nj == 1);
+        check("junction at (200, 100)",
+              nj == 1 && junctions[0].x == 200 && junctions[0].y == 100);
+        wire_geometry_release(&g);
+    }
+
+    /* ── consumer on the trunk (same y as producer) emits no drop ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y = 100;     /* same y — directly on trunk */
+        cs[1].x = 300; cs[1].y = 150;     /* needs a drop */
+        auto_route_net(&g, "mix", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "mix"));
+        /* 2 trunk H segs + only 1 drop (the second consumer). */
+        check("collinear consumer: only n-1 drops", net && net->seg_count == 3);
+        wire_geometry_release(&g);
+    }
+
+    /* ── producer interior to consumer xs (some left, some right) ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 200; prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x =   0; cs[0].y = 200;     /* to the LEFT of producer */
+        cs[1].x = 400; cs[1].y = 200;     /* to the RIGHT */
+        auto_route_net(&g, "split", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "split"));
+        /* xs: {0, 200, 400} → 2 trunk segs. Plus 2 drops. */
+        check("producer interior: 4 segs (2 trunk + 2 drops)",
+              net && net->seg_count == 4);
+        wire_geometry_release(&g);
+    }
+
+    /* ── replaces existing geometry (not append) ──────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Seed with some stale segments. */
+        int idx = wire_geometry_get_or_create(&g, "r");
+        wire_segment_t stale[] = { seg(0, 0, 100, 0) };
+        wire_geometry_set_segments(&g, idx, stale, 1);
+        check("setup: 1 stale segment", wire_geometry_net(&g, idx)->seg_count == 1);
+
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;
+        cs[1].x = 300; cs[1].y = 150;
+        auto_route_net(&g, "r", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "r"));
+        check("auto_route_net replaces old geometry (not append)",
+              net && net->seg_count == 4);
+        wire_geometry_release(&g);
+    }
+
+    /* ── NULL / empty wire_name returns -1 ────────────────────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0; prod.y = 0;
+        vec2_t cs[1] = { {{100, 50}} };
+        check("NULL name returns -1",
+              auto_route_net(&g, NULL, prod, cs, 1) == -1);
+        check("empty name returns -1",
+              auto_route_net(&g, "", prod, cs, 1) == -1);
+        wire_geometry_release(&g);
+    }
+
     /* ── shift_segment: fan-out — algorithm conservatively refuses when
        the target shares an endpoint with multiple routes (corrupts the
        other route into a diagonal). The app layer should detect this

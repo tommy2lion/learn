@@ -250,38 +250,57 @@ static int seg_is_draggable(const circuit_canvas_widget_t *cw,
    so fan-out nets accumulate one route per consumer in the same wire_net_geom_t.
    Called from create() / set_circuit() and from the Phase-4 mutation paths.
    Releases any previous geometry first, so calling twice is fine. */
+/* Collect every consumer pin of `wire_name` into out[]; returns the count
+   (0 if the wire has no consumers). Caller sizes out[] generously
+   (MAX_CCW_FANOUT is fine). (Phase 13 helper) */
+#define MAX_CCW_FANOUT 32
+static int collect_consumer_pins(const circuit_t *c, const char *wire_name,
+                                  vec2_t *out, int max_out) {
+    int n = 0;
+    for (int i = 0; i < c->component_count && n < max_out; i++) {
+        component_t *comp = c->components[i];
+        int n_in = component_pin_count_in(comp);
+        for (int p = 0; p < n_in && n < max_out; p++) {
+            if (strcmp(comp->in_wires[p], wire_name) != 0) continue;
+            out[n++] = node_input_pin(c, (node_ref_t){NODE_COMPONENT, i}, p);
+        }
+    }
+    for (int i = 0; i < c->output_count && n < max_out; i++) {
+        if (strcmp(c->output_names[i], wire_name) != 0) continue;
+        out[n++] = node_input_pin(c, (node_ref_t){NODE_OUTPUT, i}, 0);
+    }
+    return n;
+}
+
 static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
     wire_geometry_release(&cw->wires);
     wire_geometry_init   (&cw->wires);
     circuit_t *c = cw->circuit;
     if (!c) return;
 
-    for (int i = 0; i < c->component_count; i++) {
-        component_t *comp = c->components[i];
-        int n_in = component_pin_count_in(comp);
-        for (int p = 0; p < n_in; p++) {
-            const char *wn = comp->in_wires[p];
-            if (!wn[0]) continue;
-            node_ref_t src = producer_for_wire(c, wn);
-            if (src.kind == NODE_NONE) continue;
-            vec2_t a = node_output_pin(c, src);
-            vec2_t b = node_input_pin (c, (node_ref_t){NODE_COMPONENT, i}, p);
-            auto_route_wire(&cw->wires, wn, a, b);
-        }
+    /* Producer-wire iteration: each input contributes its name; each
+       component contributes its output-wire name. For each, gather every
+       consumer pin and emit one Steiner-routed net. (Phase 13) */
+    for (int i = 0; i < c->input_count; i++) {
+        const char *wn = c->input_names[i];
+        vec2_t producer = node_output_pin(c, (node_ref_t){NODE_INPUT, i});
+        vec2_t consumers[MAX_CCW_FANOUT];
+        int n = collect_consumer_pins(c, wn, consumers, MAX_CCW_FANOUT);
+        if (n > 0) auto_route_net(&cw->wires, wn, producer, consumers, n);
     }
-    for (int i = 0; i < c->output_count; i++) {
-        const char *wn = c->output_names[i];
-        node_ref_t src = producer_for_wire(c, wn);
-        if (src.kind == NODE_NONE) continue;
-        vec2_t a = node_output_pin(c, src);
-        vec2_t b = node_input_pin (c, (node_ref_t){NODE_OUTPUT, i}, 0);
-        auto_route_wire(&cw->wires, wn, a, b);
+    for (int i = 0; i < c->component_count; i++) {
+        const char *wn = c->components[i]->name;
+        vec2_t producer = node_output_pin(c, (node_ref_t){NODE_COMPONENT, i});
+        vec2_t consumers[MAX_CCW_FANOUT];
+        int n = collect_consumer_pins(c, wn, consumers, MAX_CCW_FANOUT);
+        if (n > 0) auto_route_net(&cw->wires, wn, producer, consumers, n);
     }
 }
 
 /* Erase one net's geometry and re-route it from the current circuit state.
    Used by the targeted mutation hooks (connect / disconnect) — preserves
-   unrelated nets' geometry. NULL or empty wire_name is a no-op. */
+   unrelated nets' geometry. NULL or empty wire_name is a no-op.
+   Routes Steiner-style via auto_route_net. (Phase 13) */
 static void reseat_wire_geometry(circuit_canvas_widget_t *cw, const char *wire_name) {
     if (!wire_name || !wire_name[0]) return;
     wire_geometry_remove_net(&cw->wires, wire_name);
@@ -290,22 +309,11 @@ static void reseat_wire_geometry(circuit_canvas_widget_t *cw, const char *wire_n
 
     node_ref_t src = producer_for_wire(c, wire_name);
     if (src.kind == NODE_NONE) return;       /* producer gone: leave the net erased */
-    vec2_t a = node_output_pin(c, src);
+    vec2_t producer = node_output_pin(c, src);
 
-    for (int i = 0; i < c->component_count; i++) {
-        component_t *comp = c->components[i];
-        int n_in = component_pin_count_in(comp);
-        for (int p = 0; p < n_in; p++) {
-            if (strcmp(comp->in_wires[p], wire_name) != 0) continue;
-            vec2_t b = node_input_pin(c, (node_ref_t){NODE_COMPONENT, i}, p);
-            auto_route_wire(&cw->wires, wire_name, a, b);
-        }
-    }
-    for (int i = 0; i < c->output_count; i++) {
-        if (strcmp(c->output_names[i], wire_name) != 0) continue;
-        vec2_t b = node_input_pin(c, (node_ref_t){NODE_OUTPUT, i}, 0);
-        auto_route_wire(&cw->wires, wire_name, a, b);
-    }
+    vec2_t consumers[MAX_CCW_FANOUT];
+    int n = collect_consumer_pins(c, wire_name, consumers, MAX_CCW_FANOUT);
+    if (n > 0) auto_route_net(&cw->wires, wire_name, producer, consumers, n);
 }
 
 #ifndef NDEBUG

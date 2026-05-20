@@ -414,3 +414,76 @@ int auto_route_wire(wire_geometry_t *self, const char *wire_name,
 
     return wire_geometry_append_segments(self, idx, segs, count);
 }
+
+/* ── Steiner-trunk router (supplement Phase 13) ───────────────────── */
+
+/* Insert v into xs[] keeping it sorted and de-duplicated. *n is the
+   current count and is updated. Returns 1 if inserted, 0 if duplicate.
+   xs must have room for at least *n + 1 entries. */
+static int insert_sorted_unique(float *xs, int *n, float v) {
+    for (int i = 0; i < *n; i++) {
+        if (xs[i] == v) return 0;
+    }
+    int pos = *n;
+    while (pos > 0 && xs[pos - 1] > v) {
+        xs[pos] = xs[pos - 1];
+        pos--;
+    }
+    xs[pos] = v;
+    (*n)++;
+    return 1;
+}
+
+#define MAX_FANOUT 32  /* hard cap; consumers beyond this are dropped on the floor */
+
+int auto_route_net(wire_geometry_t *self, const char *wire_name,
+                   vec2_t producer, const vec2_t *consumers, int n) {
+    if (!self || !wire_name || !wire_name[0]) return -1;
+    if (n > 0 && !consumers) return -1;
+
+    /* Drop any existing geometry for this net; we replace it wholesale. */
+    wire_geometry_remove_net(self, wire_name);
+
+    if (n <= 0) {
+        /* Net has no consumers — leave geometry absent. The renderer's
+           stale-producer filter already skips empty nets. */
+        return 0;
+    }
+    if (n == 1) {
+        /* Single consumer: fall back to the Z-router. */
+        return auto_route_wire(self, wire_name, producer, consumers[0]);
+    }
+
+    int net_idx = wire_geometry_get_or_create(self, wire_name);
+    if (net_idx < 0) return -1;
+
+    int eff_n = n < MAX_FANOUT ? n : MAX_FANOUT;
+
+    /* Collect the unique x-coords of producer + consumers, sorted. */
+    float xs[MAX_FANOUT + 1];
+    int   n_xs = 0;
+    insert_sorted_unique(xs, &n_xs, producer.x);
+    for (int i = 0; i < eff_n; i++) {
+        insert_sorted_unique(xs, &n_xs, consumers[i].x);
+    }
+
+    /* Emit consecutive horizontal trunk segments between adjacent xs. */
+    for (int i = 0; i + 1 < n_xs; i++) {
+        wire_segment_t h;
+        h.a.x = xs[i];     h.a.y = producer.y;
+        h.b.x = xs[i + 1]; h.b.y = producer.y;
+        wire_geometry_append_segments(self, net_idx, &h, 1);
+    }
+
+    /* Emit vertical drops for each consumer whose y differs from producer.y.
+       Consumers exactly on the trunk (same y as producer) need no drop —
+       their pin already sits on the trunk's H. */
+    for (int i = 0; i < eff_n; i++) {
+        if (consumers[i].y == producer.y) continue;
+        wire_segment_t v;
+        v.a.x = consumers[i].x; v.a.y = producer.y;
+        v.b.x = consumers[i].x; v.b.y = consumers[i].y;
+        wire_geometry_append_segments(self, net_idx, &v, 1);
+    }
+    return 0;
+}
