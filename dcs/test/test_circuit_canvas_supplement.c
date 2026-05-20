@@ -116,6 +116,16 @@ static void mock_igraph_init(igraph_t *g, mock_counts_t *m) {
     g->set_cursor      = mk_set_cursor;
 }
 
+/* ── stub custom render for Phase 9 hook-dispatch test ─────────────── */
+static int g_custom_render_calls = 0;
+static void custom_render_stub(igraph_t *g,
+                               const circuit_t *c,
+                               const external_view_metadata_t *meta,
+                               rect_t viewport) {
+    (void)g; (void)c; (void)meta; (void)viewport;
+    g_custom_render_calls++;
+}
+
 /* Build: inputs A, B; output Y; component g1 = and(A, B); Y consumes g1.
    Nets exist for A, B, g1 — three total. */
 static circuit_t *make_simple_circuit(void) {
@@ -410,19 +420,20 @@ int main(void) {
         circuit_destroy(c2);
     }
 
-    /* ── set_display_name: store / clear ──────────────────────────── */
+    /* ── set_display_name: store / clear (now via external_meta) ──── */
     {
         circuit_t *c = make_simple_circuit();
         circuit_canvas_widget_t *cw =
             circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
-        check("display_name starts empty",  cw->display_name[0] == '\0');
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        check("display_name starts empty",  meta->display_name[0] == '\0');
         circuit_canvas_widget_set_display_name(cw, "MyCircuit");
         check("display_name stored",
-              strcmp(cw->display_name, "MyCircuit") == 0);
+              strcmp(meta->display_name, "MyCircuit") == 0);
         circuit_canvas_widget_set_display_name(cw, NULL);
-        check("display_name cleared (NULL)", cw->display_name[0] == '\0');
+        check("display_name cleared (NULL)", meta->display_name[0] == '\0');
         circuit_canvas_widget_set_display_name(cw, "");
-        check("display_name cleared (empty)", cw->display_name[0] == '\0');
+        check("display_name cleared (empty)", meta->display_name[0] == '\0');
         widget_destroy(&cw->base);
         circuit_destroy(c);
     }
@@ -488,6 +499,160 @@ int main(void) {
         check("EXTERNAL: click does not delete / add components",
               c->component_count == comp_count_before);
         widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ──────────────────────────────────────────────────────────────────
+       supplement Phase 9 — metadata defaults, clock pin, render hook
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── external_view_metadata_init defaults ─────────────────────── */
+    {
+        external_view_metadata_t m;
+        /* Deliberately dirty the struct first to make sure init zeros it. */
+        memset(&m, 0xCC, sizeof(m));
+        external_view_metadata_init(&m);
+        check("init: display_name is empty",      m.display_name[0] == '\0');
+        check("init: render is NULL",             m.render == NULL);
+        int all_normal_in  = 1, all_normal_out = 1;
+        for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+            if (m.input_styles[i]  != PIN_STYLE_NORMAL) all_normal_in  = 0;
+            if (m.output_styles[i] != PIN_STYLE_NORMAL) all_normal_out = 0;
+        }
+        check("init: every input  style is NORMAL",  all_normal_in);
+        check("init: every output style is NORMAL",  all_normal_out);
+    }
+
+    /* ── canvas widget defaults external_meta to NORMAL/NULL ──────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        check("canvas create: meta != NULL",        meta != NULL);
+        check("canvas create: render is NULL",      meta && meta->render == NULL);
+        check("canvas create: input[0] is NORMAL",
+              meta && meta->input_styles[0] == PIN_STYLE_NORMAL);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── set_circuit re-initialises external_meta (drops any per-pin
+       customisation when loading a new file) ──────────────────────── */
+    {
+        circuit_t *c1 = make_simple_circuit();
+        circuit_t *c2 = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c1);
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        meta->input_styles[0] = PIN_STYLE_CLOCK;
+        meta->render = custom_render_stub;
+        circuit_canvas_widget_set_circuit(cw, c2);
+        check("set_circuit: clock style cleared",
+              meta->input_styles[0] == PIN_STYLE_NORMAL);
+        check("set_circuit: render hook cleared",
+              meta->render == NULL);
+        widget_destroy(&cw->base);
+        circuit_destroy(c1);
+        circuit_destroy(c2);
+    }
+
+    /* ── PIN_STYLE_CLOCK adds 2 extra draw_line calls per clock pin ── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+
+        igraph_t mock_g;
+        mock_counts_t counts;
+
+        /* All NORMAL: n_in + n_out pin stub draw_lines. */
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        int normal_lines = counts.n_line;
+
+        /* Flip input[0] to CLOCK: triangle = 2 extra lines. */
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        meta->input_styles[0] = PIN_STYLE_CLOCK;
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        check("CLOCK on input[0]: 2 extra draw_line (triangle)",
+              counts.n_line == normal_lines + 2);
+
+        /* Add CLOCK on output[0] too: another 2 extra. */
+        meta->output_styles[0] = PIN_STYLE_CLOCK;
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        check("CLOCK on input[0] + output[0]: 4 extra draw_line total",
+              counts.n_line == normal_lines + 4);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── PIN_STYLE_INVERTED is recognised but not drawn yet (reserved) ─ */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+
+        igraph_t mock_g;
+        mock_counts_t counts;
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        int normal_lines = counts.n_line;
+
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        meta->input_styles[0] = PIN_STYLE_INVERTED;
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        check("INVERTED (reserved): no extra draw_line — falls back to NORMAL",
+              counts.n_line == normal_lines);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── custom render hook overrides default renderer ─────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+        circuit_canvas_widget_set_display_name(cw, MOCK_NAME_TARGET);
+
+        external_view_metadata_t *meta = circuit_canvas_widget_external_meta(cw);
+        g_custom_render_calls = 0;
+        meta->render = custom_render_stub;
+
+        igraph_t mock_g;
+        mock_counts_t counts;
+        mock_igraph_init(&mock_g, &counts);
+        widget_draw(&cw->base, &mock_g);
+        check("custom render hook was called",
+              g_custom_render_calls == 1);
+        check("custom render: default's draw_text NOT invoked",
+              counts.saw_display_name == 0);
+        /* Stub doesn't draw anything, so primitive counts stay minimal —
+           background fill + outline only (from ccw_draw, before scissor). */
+        check("custom render: no draw_line from default renderer",
+              counts.n_line == 0);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── external_view_draw rejects NULL meta safely ──────────────── */
+    {
+        igraph_t mock_g;
+        mock_counts_t counts;
+        mock_igraph_init(&mock_g, &counts);
+        circuit_t *c = make_simple_circuit();
+        external_view_draw(&mock_g, c, NULL, (rect_t){0, 0, 100, 100});
+        check("NULL meta: no crash, no primitives",
+              counts.n_rect == 0 && counts.n_line == 0);
         circuit_destroy(c);
     }
 

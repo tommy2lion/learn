@@ -12,15 +12,46 @@
 #define EV_LABEL_PAD      8.0f       /* gap between pin tip and its label */
 #define EV_NAME_SIZE     22.0f       /* font size for the centered name */
 #define EV_PIN_SIZE      14.0f       /* font size for pin labels */
+#define EV_CLOCK_DEPTH    8.0f       /* how far the clock triangle reaches in */
+#define EV_CLOCK_HALF     5.0f       /* half-height of the clock triangle */
 
 static float fmax2(float a, float b) { return a > b ? a : b; }
 
+void external_view_metadata_init(external_view_metadata_t *m) {
+    if (!m) return;
+    memset(m, 0, sizeof(*m));      /* NORMAL == 0, render == NULL */
+}
+
+void external_view_draw(igraph_t *g,
+                        const circuit_t *c,
+                        const external_view_metadata_t *meta,
+                        rect_t viewport) {
+    if (!g || !c || !meta) return;
+    if (meta->render) {
+        meta->render(g, c, meta, viewport);
+        return;
+    }
+    external_view_draw_default(g, c, meta, viewport);
+}
+
+/* Draw the clock-edge "edge mark" inside the box at a pin location.
+   `dir` is +1 for left-edge inputs (triangle points right, into the box)
+   and -1 for right-edge outputs (triangle points left). */
+static void draw_clock_mark(igraph_t *g, vec2_t inside_pin, int dir) {
+    vec2_t top    = { inside_pin.x,                          inside_pin.y - EV_CLOCK_HALF };
+    vec2_t tip    = { inside_pin.x + dir * EV_CLOCK_DEPTH,   inside_pin.y                 };
+    vec2_t bottom = { inside_pin.x,                          inside_pin.y + EV_CLOCK_HALF };
+    g->draw_line(g->self, top, tip,    2.0f, COLOR_BLACK);
+    g->draw_line(g->self, tip, bottom, 2.0f, COLOR_BLACK);
+}
+
 void external_view_draw_default(igraph_t *g,
                                 const circuit_t *c,
-                                const char *display_name,
+                                const external_view_metadata_t *meta,
                                 rect_t viewport) {
-    if (!g || !c) return;
+    if (!g || !c || !meta) return;
 
+    const char *display_name = meta->display_name;
     int n_in  = c->input_count;
     int n_out = c->output_count;
     int max_pins = n_in > n_out ? n_in : n_out;
@@ -73,6 +104,9 @@ void external_view_draw_default(igraph_t *g,
         label.x = pin_tip.x - EV_LABEL_PAD - tw;
         label.y = pin_tip.y - EV_PIN_SIZE * 0.5f;
         g->draw_text(g->self, nm, label, EV_PIN_SIZE, COLOR_BLACK);
+        if (i < DOMAIN_MAX_IO && meta->input_styles[i] == PIN_STYLE_CLOCK) {
+            draw_clock_mark(g, pin_inside, +1);   /* triangle points into box */
+        }
     }
 
     /* Output pins along the right edge. */
@@ -85,10 +119,14 @@ void external_view_draw_default(igraph_t *g,
         g->draw_line  (g->self, pin_inside, pin_tip, 2.0f, COLOR_BLACK);
         g->draw_circle(g->self, pin_tip,    EV_PIN_R, COLOR_BLACK);
         const char *nm = c->output_names[i];
-        if (!nm[0]) continue;
-        vec2_t label;
-        label.x = pin_tip.x + EV_LABEL_PAD;
-        label.y = pin_tip.y - EV_PIN_SIZE * 0.5f;
-        g->draw_text(g->self, nm, label, EV_PIN_SIZE, COLOR_BLACK);
+        if (nm[0]) {
+            vec2_t label;
+            label.x = pin_tip.x + EV_LABEL_PAD;
+            label.y = pin_tip.y - EV_PIN_SIZE * 0.5f;
+            g->draw_text(g->self, nm, label, EV_PIN_SIZE, COLOR_BLACK);
+        }
+        if (i < DOMAIN_MAX_IO && meta->output_styles[i] == PIN_STYLE_CLOCK) {
+            draw_clock_mark(g, pin_inside, -1);   /* triangle points into box */
+        }
     }
 }

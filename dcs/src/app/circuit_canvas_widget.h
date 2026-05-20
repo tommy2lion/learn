@@ -5,6 +5,7 @@
 #include "../domain/circuit.h"
 #include "../domain/wire_geometry.h"
 #include "editor_state.h"
+#include "external_view.h"
 
 /* Editor modes. Plain enum (a State-pattern refactor is a future polish). */
 typedef enum {
@@ -76,12 +77,12 @@ class tagt_circuit_canvas_widget {
     /* Click-to-highlight: empty string = no highlight (Phase 6). */
     char highlighted_net[DOMAIN_NAME_LEN];
 
-    /* External (black-box) vs internal (schematic) view — Phase 8. The
-       display_name shows inside the box in external view; dcs_app sets
-       it to the file basename on load/new. Phase 9 will fold both fields
-       into a richer external_view_metadata_t. */
-    display_mode_t display_mode;
-    char           display_name[DOMAIN_NAME_LEN];
+    /* External (black-box) vs internal (schematic) view — Phase 8/9.
+       external_meta carries the display name (set to the file basename
+       by dcs_app), per-pin style overrides, and an optional render
+       hook that overrides the default rectangle renderer entirely. */
+    display_mode_t           display_mode;
+    external_view_metadata_t external_meta;
 };
 typedef class tagt_circuit_canvas_widget circuit_canvas_widget_t;
 
@@ -130,8 +131,16 @@ void           circuit_canvas_widget_set_display_mode(circuit_canvas_widget_t *s
                                                       display_mode_t mode);
 
 /* Label shown inside the external-view box. Empty / NULL clears it.
-   dcs_app sets this to the file basename on load/new. (Phase 8) */
+   dcs_app sets this to the file basename on load/new. Convenience for
+   the common case — for richer external-view customisation (per-pin
+   styles, custom render hook) reach into external_meta directly via
+   the accessor below. (Phase 8/9) */
 void circuit_canvas_widget_set_display_name(circuit_canvas_widget_t *self,
                                             const char *name);
+
+/* Mutable access to the external-view metadata struct. Callers may set
+   per-pin styles, install a custom render function, or update the
+   display name in place. (Phase 9) */
+external_view_metadata_t *circuit_canvas_widget_external_meta(circuit_canvas_widget_t *self);
 
 #endif /* DCS_APP_CIRCUIT_CANVAS_H */

@@ -884,8 +884,8 @@ static void ccw_draw(widget_t *self, igraph_t *g) {
     g->push_scissor(g->self, self->bounds);
     if (cw->display_mode == DISPLAY_EXTERNAL && cw->circuit) {
         /* Black-box view: no camera transform, draw centered in viewport.
-           Phase 9 will route through the metadata struct + render hook. */
-        external_view_draw_default(g, cw->circuit, cw->display_name, self->bounds);
+           Dispatches through external_meta.render — Phase 9. */
+        external_view_draw(g, cw->circuit, &cw->external_meta, self->bounds);
     } else {
         g->push_camera2d(g->self, cw->cam_target, cw->cam_offset, cw->cam_zoom);
         draw_world(cw, g);
@@ -1239,10 +1239,14 @@ void circuit_canvas_widget_set_display_mode(circuit_canvas_widget_t *self,
 void circuit_canvas_widget_set_display_name(circuit_canvas_widget_t *self,
                                             const char *name) {
     if (!name || !name[0]) {
-        self->display_name[0] = '\0';
+        self->external_meta.display_name[0] = '\0';
         return;
     }
-    snprintf(self->display_name, DOMAIN_NAME_LEN, "%s", name);
+    snprintf(self->external_meta.display_name, DOMAIN_NAME_LEN, "%s", name);
+}
+
+external_view_metadata_t *circuit_canvas_widget_external_meta(circuit_canvas_widget_t *self) {
+    return &self->external_meta;
 }
 
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
@@ -1258,7 +1262,7 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self) {
     self->counter_gate = 0;
     self->highlighted_net[0] = '\0';
     self->display_mode = DISPLAY_INTERNAL;
-    self->display_name[0] = '\0';
+    external_view_metadata_init(&self->external_meta);
 }
 
 void circuit_canvas_widget_fit_view(circuit_canvas_widget_t *self) {
