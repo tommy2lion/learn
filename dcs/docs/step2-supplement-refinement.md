@@ -519,7 +519,7 @@ wiring dirty/clean through mutations and save.
 
 ---
 
-## R-12 — `Ctrl+A` to select all components ⏸
+## R-12 — `Ctrl+A` to select all components ✅
 
 **Observation.** No "select all" shortcut exists today. Multi-select
 requires marquee-drag, which is fiddly on large schematics.
@@ -537,7 +537,7 @@ helper that iterates the circuit's nodes.
 
 ---
 
-## R-13 — `Del` key deletes the current selection ⏸
+## R-13 — `Del` key deletes the current selection ✅
 
 **Observation.** Right-click deletes one node at a time; `Del`
 should delete the entire current selection in one step. The

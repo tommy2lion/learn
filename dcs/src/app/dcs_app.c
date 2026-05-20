@@ -285,6 +285,10 @@ static void poll_global_shortcuts(dcs_app_t *app) {
         else       action_save   (app);
     }
     if (ctrl && g->key_pressed(g->self, IK_B)) action_toggle_display_mode(app);
+    /* Ctrl+A selects every node (R-12). Routed through the global shortcut
+       path so it fires regardless of which widget owns focus. */
+    if (ctrl && g->key_pressed(g->self, IK_A))
+        circuit_canvas_widget_select_all(app->circuit_canvas);
     /* Keyboard zoom — Ctrl+= (the '+' key without Shift) zooms in,
        Ctrl+- zooms out. Mirrors the mouse-wheel zoom but focuses on
        the current cam_offset (typically the canvas centre). */

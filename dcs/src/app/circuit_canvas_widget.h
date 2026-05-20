@@ -117,6 +117,11 @@ void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t
 /* Reset visual + interaction state when the circuit is replaced (new/open). */
 void circuit_canvas_widget_reset(circuit_canvas_widget_t *self);
 
+/* Replace the selection with every input / component / output in the circuit
+   (capped at MAX_SELECTION). Public so dcs_app's global Ctrl+A shortcut can
+   reach it without the canvas needing focus. Idempotent. (R-12) */
+void circuit_canvas_widget_select_all(circuit_canvas_widget_t *self);
+
 /* Drop all wire geometry and re-route from the current circuit's connectivity.
    Called internally by the canvas's mutation paths; exposed for testing and
    for any future caller that has mutated the underlying circuit_t outside

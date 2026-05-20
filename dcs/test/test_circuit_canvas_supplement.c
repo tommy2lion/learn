@@ -1225,6 +1225,74 @@ int main(void) {
         circuit_destroy(c2);
     }
 
+    /* ── R-12: select_all populates selection with every node ───── */
+    {
+        circuit_t *c = make_simple_circuit();   /* 2 inputs + 1 gate + 1 output */
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        check("select_all: empty selection to start",
+              cw->selection_count == 0);
+        circuit_canvas_widget_select_all(cw);
+        check("select_all: count equals total nodes (2 in + 1 comp + 1 out = 4)",
+              cw->selection_count == 4);
+        /* Tally per-kind to confirm every category was added. */
+        int n_in = 0, n_comp = 0, n_out = 0;
+        for (int i = 0; i < cw->selection_count; i++) {
+            if (cw->selection[i].kind == NODE_INPUT)     n_in++;
+            if (cw->selection[i].kind == NODE_COMPONENT) n_comp++;
+            if (cw->selection[i].kind == NODE_OUTPUT)    n_out++;
+        }
+        check("select_all: 2 inputs added",    n_in == 2);
+        check("select_all: 1 component added", n_comp == 1);
+        check("select_all: 1 output added",    n_out == 1);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-12: select_all clears any prior selection first ────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        /* Pre-populate with a bogus duplicate to verify clear-first. */
+        cw->selection[0] = (node_ref_t){NODE_INPUT, 0};
+        cw->selection[1] = (node_ref_t){NODE_INPUT, 0};
+        cw->selection_count = 2;
+        circuit_canvas_widget_select_all(cw);
+        check("select_all: prior selection cleared (no duplicate)",
+              cw->selection_count == 4);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-12: select_all on NULL widget is a no-op ──────────────── */
+    {
+        circuit_canvas_widget_select_all(NULL);   /* must not crash */
+        check("select_all(NULL) is safe", 1);
+    }
+
+    /* ── R-13: synthetic Delete key event removes the selection ──── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        circuit_canvas_widget_select_all(cw);
+        int before = c->input_count + c->component_count + c->output_count;
+        check("R-13 setup: 4 nodes pre-delete", before == 4);
+
+        event_t del;
+        memset(&del, 0, sizeof(del));
+        del.kind    = EV_KEY_PRESS;
+        del.key.key = IK_DELETE;
+        widget_handle_event(&cw->base, &del);
+
+        int after = c->input_count + c->component_count + c->output_count;
+        check("Del key: removes every selected node",   after == 0);
+        check("Del key: clears selection_count after",  cw->selection_count == 0);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

@@ -1243,8 +1243,9 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
         return 1;
     }
 
-    /* keys: ESC cancels current mode + clears selection; Delete removes selection;
-       Ctrl+A selects all */
+    /* keys: ESC cancels current mode + clears selection; Delete removes
+       selection. (Ctrl+A select-all is handled globally by dcs_app's
+       poll_global_shortcuts so it works regardless of focus — R-12.) */
     if (ev->kind == EV_KEY_PRESS) {
         if (ev->key.key == IK_ESCAPE) {
             cw->mode = CMODE_IDLE;
@@ -1258,17 +1259,6 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             int n = selection_count(cw);
             remove_selection(cw);
             status(cw, "Deleted %d node%s", n, n == 1 ? "" : "s");
-            return 1;
-        }
-        if (ev->key.key == IK_A && (ev->key.mods & MOD_CTRL)) {
-            selection_clear(cw);
-            for (int i = 0; i < cw->circuit->component_count; i++)
-                selection_add(cw, (node_ref_t){NODE_COMPONENT, i});
-            for (int i = 0; i < cw->circuit->input_count; i++)
-                selection_add(cw, (node_ref_t){NODE_INPUT, i});
-            for (int i = 0; i < cw->circuit->output_count; i++)
-                selection_add(cw, (node_ref_t){NODE_OUTPUT, i});
-            status(cw, "Selected %d node%s", cw->selection_count, cw->selection_count == 1 ? "" : "s");
             return 1;
         }
     }
@@ -1544,6 +1534,19 @@ void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t
 void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self) {
     seed_geometry_from_circuit(self);
     assert_geometry_consistent(self);
+}
+
+void circuit_canvas_widget_select_all(circuit_canvas_widget_t *self) {
+    if (!self || !self->circuit) return;
+    selection_clear(self);
+    for (int i = 0; i < self->circuit->component_count; i++)
+        selection_add(self, (node_ref_t){NODE_COMPONENT, i});
+    for (int i = 0; i < self->circuit->input_count; i++)
+        selection_add(self, (node_ref_t){NODE_INPUT, i});
+    for (int i = 0; i < self->circuit->output_count; i++)
+        selection_add(self, (node_ref_t){NODE_OUTPUT, i});
+    status(self, "Selected %d node%s",
+           self->selection_count, self->selection_count == 1 ? "" : "s");
 }
 
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
