@@ -1,13 +1,15 @@
 # Step 2 Supplement — Refinement notes
 
 Observations from manual testing of the Step 2 supplement implementation
-(Phases 1–12) that should be addressed in a future iteration. None of
+(Phases 1–13) that should be addressed in a future iteration. None of
 these block the supplement from being considered "done"; they're polish /
 architectural improvements deferred to Step 3 or a Step-2.5 follow-up.
 
+**Status legend:** ✅ implemented · 🟡 partially implemented · ⏸ deferred
+
 ---
 
-## R-1 — Decouple the external-view display name from the file basename
+## R-1 — Decouple the external-view display name from the file basename ⏸
 
 **Observation (manual testing of Phase 8 / 10).** When entering BLACKBOX
 view, the rectangle is currently labeled with the file basename (e.g.
@@ -59,7 +61,7 @@ clarification in R-1 prepares the ground for that.
 
 ---
 
-## R-2 — Sidebar `[ ] BLACK-BOX` button is small / discoverable
+## R-2 — Sidebar `[ ] BLACK-BOX` button is small / discoverable ⏸
 
 **Observation (Phase 8).** The sidebar toggle button works but is
 visually subtle — easy to miss against the dark toolbar background.
@@ -70,7 +72,7 @@ text. Low priority — the menu item and `Ctrl+B` are equally functional.
 
 ---
 
-## R-3 — Pin stubs (deferred from Phase 11 plan)
+## R-3 — Pin stubs (deferred from Phase 11 plan) ⏸
 
 **Observation (Phase 11 plan).** The implementation plan suggested that
 pin stubs poke *outside* the gate body so wires terminate ~6 px before
@@ -87,7 +89,7 @@ touch pin-position math.
 
 ---
 
-## R-4 — `circuits/dff_stub.dcs` is not a real D flip-flop
+## R-4 — `circuits/dff_stub.dcs` is not a real D flip-flop ⏸
 
 **Observation.** `dff_stub.dcs` (added in `14e3023`) is a placeholder
 showing pin names + external-view styling, but its internal logic
@@ -100,7 +102,7 @@ work needed before then — the file's stub status is clearly flagged.
 
 ---
 
-## R-5 — Editing undo / redo (`Ctrl+Z` / `Ctrl+Y`)
+## R-5 — Editing undo / redo (`Ctrl+Z` / `Ctrl+Y`) ⏸
 
 **Observation (clarified during Phase-12 review).** The codebase has no
 user-facing undo. The only way to revert an edit is to reload the last
@@ -163,7 +165,7 @@ comments is misleading.
 
 ---
 
-## R-6 — Vertical input-pin approach (edge case + pin orientation)
+## R-6 — Vertical input-pin approach (edge case + pin orientation) ⏸
 
 **Observation (Phase-13 manual testing, `b2832c1`).** The Steiner router
 now arrives at each off-trunk consumer pin via a per-consumer Z (V drop
@@ -235,7 +237,7 @@ Bundle with Step 3 Phase 3.1 / 3.3.
 
 ---
 
-## R-7 — Network type classification + per-pin orientation case enumeration
+## R-7 — Network type classification + per-pin orientation case enumeration 🟡
 
 **Observation (user feedback, Phase 13 review).** A more complete way
 to think about wire routing is to classify each net by its **producer
@@ -296,9 +298,18 @@ Step 3.
 **Connected to.** R-6 (pin orientation is the prerequisite), R-8
 (shared vertical bus changes how multi-consumer cases assemble).
 
+**Status (post-Phase-13).** Partial. The auto-align pass
+(`circuit_canvas_widget_auto_align`) lands in `ec00095` /
+`7ffdf09` and handles the simplest case — when a consumer's pin
+sits within 8 px of its producer's y, snap the component so the
+pin aligns exactly (avoiding a tiny dog-leg). The full case
+enumeration above (six sub-cases for vertical pins) is still
+deferred, gated on R-6 pin-orientation metadata. See
+**P13-E** below for what landed.
+
 ---
 
-## R-8 — Shared vertical bus per net
+## R-8 — Shared vertical bus per net ✅
 
 **Observation
 ([`issues/202605201546-issue-there-should-be-a-vertical-bus.png`](../issues/202605201546-issue-there-should-be-a-vertical-bus.png)).**
@@ -384,9 +395,15 @@ about the bus to do collision-aware placement.
 adds a per-canvas V-bus-x registry, updates the junction renderer's
 expectations. Maybe 200–300 LOC + tests.
 
+**Status (post-Phase-13).** Implemented in `a50861a` + collision
+avoidance in `1725001` + draggable as a unit in `71ed6c3`. The
+per-canvas V-bus-x registry is NOT yet built — collision avoidance
+is per-route (later-routed nets shift around earlier-routed ones),
+not globally optimal. Workable in v1; see **P13-D** below.
+
 ---
 
-## R-9 — Feedback circuits (output → earlier-stage input)
+## R-9 — Feedback circuits (output → earlier-stage input) ⏸
 
 **Observation (user, Phase 13 review).** Real digital circuits often
 include **feedback** — the output of a later stage drives the input
@@ -440,18 +457,133 @@ flip-flops introduce the need for proper feedback handling).
 
 ---
 
+## Post-Phase-13 implementation work
+
+After the implementation plan's final stretch phase landed
+(`22ea9c8`), additional refinement work followed in response to
+manual GUI testing. Cataloguing it here so the deferred-vs-done
+picture is complete and future readers can find the relevant
+commits without scanning the whole log.
+
+### P13-A — `circuits/demo1-and3.dcs` test fixture (`6e4a979`)
+
+The implementation plan referenced this file as a manual-visual
+gate target, but no commit ever actually created it. Built it now
+with a three-AND-gate fan-out topology specifically designed to
+exercise Phase 5 junction dots, Phase 8/9 external view, Phase 11
+glyphs, and Phase 13 fan-out — all in one circuit.
+
+Verified parses + evaluates as `Y = A AND B AND C` via the CLI.
+
+### P13-B — Steiner Z arrival per consumer (`b2832c1`)
+
+**Issue:** Phase 13 originally landed the V drops *straight above*
+each consumer pin, so the wire reached the pin via a vertical line
+from above — ambiguous (couldn't tell whether the V actually
+connected to the pin or just visually passed through). See
+`issues/202605201506-issue-unable-to-see-how-the-input-enters-the-pin-clearly.png`.
+
+**Fix:** `auto_route_net` now emits per-consumer Z arrivals:
+
+- `cy == py`: trunk extends to `cx`; no V, no stub.
+- `cx == px`: single V drop straight down; no stub.
+- otherwise: V drop at `snap_midpoint(px, cx)` + H stub from
+  `(anchor_x, cy)` to `(cx, cy)`.
+
+This is what the single-consumer Z-router already did; multi-
+consumer mode now matches.
+
+### P13-C — Refinement entries R-6 / R-7 / R-8 / R-9 recorded (`d1458e8`, `aeb2a2e`)
+
+Documented the four follow-up refinement ideas that came out of
+post-Phase-13 review without immediately implementing them: vertical
+input-pin approach (R-6), comprehensive routing case enumeration
+(R-7), shared V bus per net (R-8), feedback circuits (R-9).
+
+R-8 was then implemented (see below). R-6, R-7 (partial), and R-9
+remain deferred.
+
+### P13-D — R-8 shared V bus per net (`a50861a`, `1725001`, `71ed6c3`)
+
+Replaces per-consumer anchor columns from P13-B with **one shared
+V bus per net** — matches the classic schematic bus convention.
+Landed in three steps:
+
+- **`a50861a`** — algorithm: H trunk to `snap_midpoint(px, min_cx)`,
+  then one V bus broken at every unique y (producer.y + each
+  consumer.y), then one H stub per consumer. All-collinear-consumers
+  case shortcut to H-trunk-only. n=1 falls back to the Z-router.
+- **`1725001`** — collision avoidance: shift V_bus_x leftward by
+  2*GRID (16 px) when another net's V segment sits within that
+  range in an overlapping y interval. Cap at 16 attempts (256 px
+  of clearance); routing order is deterministic (inputs first,
+  components in storage = topological order).
+- **`71ed6c3`** — `wire_geometry_shift_v_bus` operation so the
+  whole V bus can be dragged as a unit (Phase 12 interaction).
+  Canvas widget's `seg_is_draggable` recognises V-bus segments
+  (≥ 2 V segs at the same column) and dispatches to the new shift.
+
+**Constraint still NOT enforced:** the collision check is pairwise
+against other nets routed BEFORE this one (route order dependent);
+no global registry of "used V-bus-x columns" exists. Two nets
+routed simultaneously couldn't collide-avoid each other. Workable
+in v1; per-canvas registry can come later if needed.
+
+### P13-E — R-7 partial: auto-align components to trunks (`ec00095`, `7ffdf09`)
+
+The full R-7 (pin-orientation case enumeration) remains deferred,
+but one part of its spirit shipped: when a consumer's pin sits
+within **8 px (= 1 grid step)** of its producer's y, the component
+is snapped vertically so the pin aligns exactly. Result: small
+dog-leg V drops + H stubs collapse to single straight H wires on
+file open.
+
+- **`ec00095`** — initial implementation. `auto_align_components_to_trunks`
+  (now `circuit_canvas_widget_auto_align`) shifts components in
+  topological order; multi-input gates align to the pin with
+  highest producer fan-out (tie-break: smaller |Δ|); external
+  outputs also align to their producers. Called by `_create` and
+  `_set_circuit` only — NOT by drag-end (so user drag intent isn't
+  fought).
+- **`7ffdf09`** — fix for "auto-align ran but had no visible effect on
+  file open". Root cause: `load_circuit_from_text` ran auto-align +
+  re-routed, then loaded the file's `# @wires` block which
+  overwrote the freshly-aligned wires with the file's *stale*
+  routing. Fix: `circuit_canvas_widget_auto_align` now returns the
+  shift count; the load path skips `load_geometry` when any shift
+  happened (preserving fresh routes), and keeps file's wires only
+  when no shift occurred (preserving Phase-12 manual bend-drags).
+
+The user-supplied fixture `circuits/testx.dcs` establishes the
+8 px threshold: Δ=7 snaps, Δ=17 doesn't. Three of testx.dcs's four
+wires straighten on open; the in2 wire (Δ=17) keeps its Z as
+presumed deliberate.
+
+### Tally
+
+| Refinement | Pre-Phase-13 | Post-Phase-13 status |
+|---|---|---|
+| R-6 (pin orientation) | proposed | ⏸ deferred |
+| R-7 (case enumeration + auto-align) | proposed | 🟡 auto-align done; case dispatch deferred |
+| R-8 (shared V bus) | proposed | ✅ V bus + collision avoidance + draggable |
+| R-9 (feedback circuits) | proposed | ⏸ deferred (Step-3+) |
+
+Test count grew from **518** (Phase 13's commit) to **561** (after
+the auto-align fix) — +43 tests across the post-Phase-13 work.
+
+---
+
 ## Out of scope / explicitly deferred
 
-The remaining stretch goal from the implementation plan:
+All 13 phases of the implementation plan landed:
 
-- **Phase 13** — Steiner-trunk routing (fan-outs draw one shared
-  horizontal trunk + per-consumer vertical drops, like
-  `step2-supplement-demo2.jpg`). Would also unlock dragging the
-  shared trunk as a unit, which v1 conservatively refuses (see
-  Phase-12 commit message for why).
+- Phases 1–11: numbered requirements R1–R6 (in
+  [`step2-supplement-req.md`](step2-supplement-req.md)).
+- Phase 12 — manual bend-point editing (`fcd0ed6`).
+- Phase 13 — Steiner-trunk routing (`22ea9c8`), refined into shared
+  V bus (`a50861a` and follow-ups).
 
-(Phase 12 — manual bend-point editing — landed in `fcd0ed6`.)
-
-Phase 13 can slide into Step 3 without compromising the supplement's
-numbered requirements (R1–R6 in
-[`step2-supplement-req.md`](step2-supplement-req.md)).
+Refinements R-1 through R-9 above capture everything observed
+during testing that should still be addressed but doesn't block
+"done". Cross-references to Step 3 phases noted per-entry where
+relevant.
