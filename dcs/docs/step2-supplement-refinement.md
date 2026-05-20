@@ -163,6 +163,78 @@ comments is misleading.
 
 ---
 
+## R-6 — Vertical input-pin approach (edge case + pin orientation)
+
+**Observation (Phase-13 manual testing, `b2832c1`).** The Steiner router
+now arrives at each off-trunk consumer pin via a per-consumer Z (V drop
++ H stub), so the wire enters the pin **horizontally from the side** —
+matching the natural orientation of left-edge input pins on AND/OR/NOT
+gates. One residual case still arrives vertically:
+
+- When a consumer sits directly **below or above the producer**
+  (`consumer.x == producer.x`), `auto_route_net` emits a single V drop
+  from `(px, py)` to `(px, cy)` with **no H stub**. The wire reaches
+  the pin from above (or below) — visually it's a vertical line
+  terminating at the pin, with the same ambiguity the rest of Phase 13
+  used to have before the `b2832c1` fix.
+
+This is rare in practice (most consumers aren't directly below their
+producer in a left-to-right schematic flow), so it wasn't worth a
+sub-grid nudge in the Phase-13 fix. Recording it here so the case is
+visible.
+
+**Refinement option A (small fix).** Treat `cx == px` like a normal
+off-trunk consumer: nudge the anchor by ±1 grid step, emit V drop
+at the nudged x, then a 1-grid-step H stub into the pin. The wire
+acquires a tiny "kink" approach instead of a straight drop. Trivial
+change in `auto_route_net` — one branch becomes one extra append.
+
+**Refinement option B (broader; ties into Step 3).** Promote pin
+**orientation** to a first-class concept. Today every input pin on a
+rectangular gate body is implicitly left-facing (wires expected to
+approach horizontally from the left), and every output is right-facing.
+A real shape DSL (Step 3 Phase 3.1) would let a component declare
+per-pin orientation:
+
+```c
+typedef enum {
+    PIN_ORIENT_LEFT,    /* pin extends from the left edge; H approach */
+    PIN_ORIENT_RIGHT,
+    PIN_ORIENT_TOP,     /* pin extends from the top edge; V approach */
+    PIN_ORIENT_BOTTOM,
+} pin_orient_t;
+```
+
+Then `auto_route_net` (or its Step-3 successor) consults pin orientation
+when choosing the final approach segment:
+
+- `LEFT` / `RIGHT` orientation: final segment is H (current default).
+- `TOP` / `BOTTOM` orientation: final segment is V (and the anchor /
+  drop / stub topology mirrors accordingly — H trunk perpendicular to
+  the approach axis isn't always the right call).
+
+This unlocks several cases the current router can't handle gracefully:
+
+- D flip-flops with a **clock pin on the bottom** (oriented `BOTTOM`,
+  expecting a V approach from below).
+- Power / ground pins on the top of an IC.
+- Gates rotated 90° in the schematic — every pin's orientation rotates
+  with the shape.
+
+**Connected to.** Step 3 Phase 3.1 (shape DSL) is the natural home for
+per-pin orientation — it's a property of the shape, not the wire. Phase
+3.4 (CLK / stateful primitives) also benefits since clock-input
+convention typically has the CLK pin at the bottom or with the clock
+mark on a specific edge.
+
+**Scope estimate.** Option A: 1-line change in `auto_route_net`.
+Option B: medium — touches `component_t` (per-pin metadata), the
+shape DSL, the router's approach-segment logic, the canvas widget's
+hit-tests (input/output pin lookup needs to consider orientation).
+Bundle with Step 3 Phase 3.1 / 3.3.
+
+---
+
 ## Out of scope / explicitly deferred
 
 The remaining stretch goal from the implementation plan:
