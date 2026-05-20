@@ -1,7 +1,7 @@
 # Step 2 Supplement — Refinement notes
 
 Observations from manual testing of the Step 2 supplement implementation
-(Phases 1–11) that should be addressed in a future iteration. None of
+(Phases 1–12) that should be addressed in a future iteration. None of
 these block the supplement from being considered "done"; they're polish /
 architectural improvements deferred to Step 3 or a Step-2.5 follow-up.
 
@@ -100,18 +100,81 @@ work needed before then — the file's stub status is clearly flagged.
 
 ---
 
+## R-5 — Editing undo / redo (`Ctrl+Z` / `Ctrl+Y`)
+
+**Observation (clarified during Phase-12 review).** The codebase has no
+user-facing undo. The only way to revert an edit is to reload the last
+saved file, which discards everything since the save. A misclick that
+deletes a gate, a wire dragged the wrong way, or an accidental
+disconnect — all permanent until the next save.
+
+(There IS a "rollback" in `wire_geometry_shift_segment` and other
+domain functions, but that's *single-call atomicity* — the function
+either succeeds or makes no changes. It's a safety net for one
+operation, not an editing history. Worth noting because the naming
+can suggest user-level undo.)
+
+**Refinement proposed — Command pattern.**
+
+1. New `domain/command.h` interface:
+   ```c
+   interface tagt_command_vt {
+       void (*do_)  (command_t *self);
+       void (*undo) (command_t *self);
+       void (*destroy)(command_t *self);
+   };
+   ```
+2. New `app/command_stack.{h,c}` holding a bounded stack (e.g. 100
+   entries). `command_stack_push(stack, cmd)` records on do;
+   `command_stack_undo(stack)` pops + applies the undo;
+   `command_stack_redo(stack)` re-applies forward.
+3. Every mutation site in `circuit_canvas_widget.c` is wrapped in a
+   concrete command:
+   - `place_component_cmd_t` (Phase 4 connect_wire path becomes a command)
+   - `connect_wire_cmd_t` / `disconnect_input_cmd_t`
+   - `delete_node_cmd_t` (records the deleted component for restore)
+   - `drag_node_cmd_t` (records the original position)
+   - `wire_shift_segment_cmd_t` (records `delta` so undo applies `-delta`)
+4. Global shortcuts: `Ctrl+Z` → `command_stack_undo(app->cmd_stack)`,
+   `Ctrl+Y` (or `Ctrl+Shift+Z`) → `command_stack_redo(...)`.
+
+**Scope estimate.** Medium. The infrastructure (~200 LOC: interface,
+stack, command helpers) is small. The invasive piece is **routing
+every existing mutation through a command** instead of directly
+mutating circuit/geometry — that's every connect / disconnect / delete /
+drag-end / wire-shift site in `circuit_canvas_widget.c`. Each becomes
+a couple of lines of "build a command, push it, execute it" instead
+of the direct mutation.
+
+**Connected to.**
+
+- Already listed in `docs/step3-plan.md` under the Step-2.7 polish
+  carry-over ("undo/redo (Command pattern)"). This refinement note
+  makes it visible here too.
+- The Phase-12 wire-edit drag would gain proper rollback semantics:
+  drag too far, ESC to cancel → undo restores the original geometry
+  (currently ESC just leaves the wire wherever the last successful
+  shift put it).
+
+**Naming clarity.** When this lands, use "undo / redo" for the
+user-facing operation and reserve "atomic" or "all-or-nothing" for
+the in-call safety pattern. Calling the latter "rollback" in code
+comments is misleading.
+
+---
+
 ## Out of scope / explicitly deferred
 
-These were called out by the implementation plan as stretch goals
-(Phases 12 and 13). Listed here so they're visible alongside the
-refinements above:
+The remaining stretch goal from the implementation plan:
 
-- **Phase 12** — manual bend-point editing (let the user drag a wire
-  segment perpendicular to its axis to reshape the route).
 - **Phase 13** — Steiner-trunk routing (fan-outs draw one shared
   horizontal trunk + per-consumer vertical drops, like
-  `step2-supplement-demo2.jpg`).
+  `step2-supplement-demo2.jpg`). Would also unlock dragging the
+  shared trunk as a unit, which v1 conservatively refuses (see
+  Phase-12 commit message for why).
 
-Both can slide into Step 3 without compromising the supplement's
+(Phase 12 — manual bend-point editing — landed in `fcd0ed6`.)
+
+Phase 13 can slide into Step 3 without compromising the supplement's
 numbered requirements (R1–R6 in
 [`step2-supplement-req.md`](step2-supplement-req.md)).
