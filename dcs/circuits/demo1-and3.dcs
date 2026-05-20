@@ -1,0 +1,36 @@
+# Three-AND-gate fan-out demo.
+#
+# Topology: input A drives two separate AND gates (a fan-out), whose
+# outputs feed a third AND. Picked specifically to exercise multiple
+# supplement phases at once:
+#
+#   - Phase 13 (Steiner trunks): wire A fans out to two consumers at
+#     different x positions, so its route is one horizontal trunk
+#     split at the first consumer's x, plus a vertical drop per
+#     consumer. A black junction dot appears at the interior T-join.
+#   - Phase 11 (IEC glyphs): the three AND gates show '&' centered.
+#   - Phase 5 (junction dots): visible at the fan-out branch point.
+#   - Phase 8 / 9 (black-box view): switch with Ctrl+B — three inputs
+#     A, B, C on the left, one output Y on the right.
+#   - Phase 7 / 10 (persistence): the layout + future @wires + @display_*
+#     annotations round-trip cleanly.
+#
+# Logical function: Y = (A AND B) AND (A AND C)
+#                     = A AND B AND C  (since A AND A == A)
+# So this is a degenerate 3-input AND — but the topology is what matters.
+
+inputs: A, B, C
+outputs: Y
+
+g1 = and(A, B)
+g2 = and(A, C)
+Y  = and(g1, g2)
+
+# @layout
+# @  g1 = 300, 280
+# @  g2 = 450, 400
+# @  Y  = 620, 340
+# @  __input:A   = 100, 220
+# @  __input:B   = 100, 340
+# @  __input:C   = 100, 460
+# @  __output:Y  = 800, 340
