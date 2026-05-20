@@ -1,0 +1,32 @@
+# A STUB "D flip-flop" — pin names only. The internal logic is a
+# placeholder (Q = D AND CLK, Qbar = NOT Q), NOT an actual edge-triggered
+# flip-flop. A real D-FF needs a stateful primitive (Step 3 Phase 3.4).
+#
+# Purpose: demonstrate the EXTERNAL (black-box) view + PIN_STYLE_CLOCK
+# from supplement Phase 8/9. Open this file in the GUI, press Ctrl+B,
+# and you should see a rectangle labeled "dff_stub" with D / CLK pins
+# on the left and Q / Qbar on the right.
+#
+# To make the CLK pin show its clock-arrow notch in the external view,
+# temporarily add this line near the end of build_widgets() in
+# src/app/dcs_app.c (after the canvas widget is created):
+#
+#   circuit_canvas_widget_external_meta(app->circuit_canvas)
+#       ->input_styles[1] = PIN_STYLE_CLOCK;     /* input[1] == "CLK" */
+#
+# Then rebuild (make gui) and open this file. Phase 10 will replace the
+# code patch with a "# @pin_style = __input:CLK : clock" annotation.
+
+inputs: D, CLK
+outputs: Q, Qbar
+
+Q    = and(D, CLK)
+Qbar = not(Q)
+
+# @layout
+# @  Q    = 280, 240
+# @  Qbar = 460, 320
+# @  __input:D    = 100, 220
+# @  __input:CLK  = 100, 340
+# @  __output:Q    = 460, 220
+# @  __output:Qbar = 640, 320
