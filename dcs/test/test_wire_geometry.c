@@ -959,7 +959,7 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
-    /* ── n=2 fan-out: trunk + per-consumer Z arrival ──────────────── */
+    /* ── n=2 fan-out: shared V bus topology (R-8) ───────────────── */
     {
         wire_geometry_t g; wire_geometry_init(&g);
         vec2_t prod; prod.x = 0;   prod.y = 100;
@@ -969,90 +969,131 @@ int main(void) {
         check("auto_route_net(n=2) returns 0",
               auto_route_net(&g, "fan2", prod, cs, 2) == 0);
         const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "fan2"));
-        /* anchor_x[0] = snap((0+200)/2) = snap(100) = 104
-           anchor_x[1] = snap((0+300)/2) = snap(150) = 152
-           Trunk xs: {0, 104, 152}; segs at producer.y between consecutive xs.
-           Per consumer: 1 V drop + 1 H stub. Total: 2 trunk + 2 V + 2 H = 6. */
-        check("n=2: 6 segments (2 trunk + 2 V drops + 2 H stubs)",
-              net && net->seg_count == 6);
-        check("trunk seg 0: (0, 100) → (104, 100)",
+        /* V_bus_x = snap((0 + 200) / 2) = snap(100) = 104.
+           Segments emitted in order:
+             0: trunk H  (0,   100) → (104, 100)
+             1: V bus  0 (104,  50) → (104, 100)
+             2: V bus  1 (104, 100) → (104, 150)
+             3: H stub 0 (104,  50) → (200,  50)
+             4: H stub 1 (104, 150) → (300, 150)
+           Total: 5 segments. */
+        check("n=2: 5 segments (1 trunk + 2 V bus + 2 H stubs)",
+              net && net->seg_count == 5);
+        check("trunk H: (0, 100) → (104, 100)",
               net && net->segs[0].a.x == 0 && net->segs[0].a.y == 100
                   && net->segs[0].b.x == 104 && net->segs[0].b.y == 100);
-        check("trunk seg 1: (104, 100) → (152, 100)",
-              net && net->segs[1].a.x == 104 && net->segs[1].b.x == 152
-                  && net->segs[1].a.y == 100 && net->segs[1].b.y == 100);
-        /* Drops + stubs interleaved per consumer (drop, stub, drop, stub). */
-        check("drop 0 V at x=104 to (104, 50)",
+        check("V bus seg 0: (104, 50) → (104, 100)",
+              net && net->segs[1].a.x == 104 && net->segs[1].a.y == 50
+                  && net->segs[1].b.x == 104 && net->segs[1].b.y == 100);
+        check("V bus seg 1: (104, 100) → (104, 150)",
               net && net->segs[2].a.x == 104 && net->segs[2].a.y == 100
-                  && net->segs[2].b.x == 104 && net->segs[2].b.y == 50);
-        check("stub 0 H from (104, 50) to (200, 50)",
+                  && net->segs[2].b.x == 104 && net->segs[2].b.y == 150);
+        check("H stub 0: (104, 50) → (200, 50)",
               net && net->segs[3].a.x == 104 && net->segs[3].a.y == 50
                   && net->segs[3].b.x == 200 && net->segs[3].b.y == 50);
-        check("drop 1 V at x=152 to (152, 150)",
-              net && net->segs[4].a.x == 152 && net->segs[4].a.y == 100
-                  && net->segs[4].b.x == 152 && net->segs[4].b.y == 150);
-        check("stub 1 H from (152, 150) to (300, 150)",
-              net && net->segs[5].a.x == 152 && net->segs[5].a.y == 150
-                  && net->segs[5].b.x == 300 && net->segs[5].b.y == 150);
+        check("H stub 1: (104, 150) → (300, 150)",
+              net && net->segs[4].a.x == 104 && net->segs[4].a.y == 150
+                  && net->segs[4].b.x == 300 && net->segs[4].b.y == 150);
         wire_geometry_release(&g);
     }
 
-    /* ── junction dot derivation picks up T-joins automatically ───── */
+    /* ── junction at trunk-meets-V-bus when consumers straddle py ── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y =  50;     /* above producer.y */
+        cs[1].x = 300; cs[1].y = 150;     /* below producer.y */
+        auto_route_net(&g, "j", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "j"));
+        vec2_t junctions[8];
+        int nj = wire_geometry_junctions(net, junctions, 8);
+        /* (104, 100) is degree-3: trunk.b + V bus seg 0.b + V bus seg 1.a.
+           V bus is broken at producer.y (= 100) so the trunk meeting point
+           is an interior break, not an endpoint. */
+        check("V-bus straddle: 1 junction at trunk-meets-bus", nj == 1);
+        check("junction at (104, 100)",
+              nj == 1 && junctions[0].x == 104 && junctions[0].y == 100);
+        wire_geometry_release(&g);
+    }
+
+    /* ── all consumers same y (below producer): junction is on bus ─ */
     {
         wire_geometry_t g; wire_geometry_init(&g);
         vec2_t prod; prod.x = 0;   prod.y = 100;
         vec2_t cs[2];
         cs[0].x = 200; cs[0].y = 200;
         cs[1].x = 300; cs[1].y = 200;
-        auto_route_net(&g, "j", prod, cs, 2);
-        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "j"));
+        auto_route_net(&g, "j2", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "j2"));
         vec2_t junctions[8];
         int nj = wire_geometry_junctions(net, junctions, 8);
-        /* anchor_x[0] = snap(100) = 104, anchor_x[1] = snap(150) = 152.
-           (104, 100) is degree-3: trunk_0.b + trunk_1.a + drop_0.a. */
-        check("Steiner Z: 1 junction at interior trunk break", nj == 1);
-        check("junction at (104, 100) — first interior anchor",
-              nj == 1 && junctions[0].x == 104 && junctions[0].y == 100);
+        /* ys = {100, 200}. V bus is one segment ending at (104, 200).
+           At (104, 200): V bus end + stub 0 a + stub 1 a = 3. JUNCTION. */
+        check("all-below-py: 1 junction at bus terminus", nj == 1);
+        check("junction at (104, 200)",
+              nj == 1 && junctions[0].x == 104 && junctions[0].y == 200);
         wire_geometry_release(&g);
     }
 
-    /* ── consumer on the trunk (same y as producer) emits no drop ── */
+    /* ── consumer on the trunk + off-trunk: 4 segs ───────────────── */
     {
         wire_geometry_t g; wire_geometry_init(&g);
         vec2_t prod; prod.x = 0;   prod.y = 100;
         vec2_t cs[2];
-        cs[0].x = 200; cs[0].y = 100;     /* same y — directly on trunk */
-        cs[1].x = 300; cs[1].y = 150;     /* needs a drop + stub */
+        cs[0].x = 200; cs[0].y = 100;     /* collinear */
+        cs[1].x = 300; cs[1].y = 150;     /* off-trunk */
         auto_route_net(&g, "mix", prod, cs, 2);
         const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "mix"));
-        /* trunk_xs: {0, anchor_x[1]=snap(150)=152, 200}. Two trunk H segs.
-           Plus 1 V + 1 H stub for the off-trunk consumer. */
-        check("collinear consumer: 4 segs (2 trunk + 1 drop + 1 stub)",
+        /* V_bus_x = snap((0+200)/2) = 104.
+           ys = {100, 150}. V bus segs: (104, 100)→(104, 150). 1 V.
+           Trunk: (0,100)→(104,100). 1 trunk.
+           Stubs: (104,100)→(200,100), (104,150)→(300,150). 2 stubs.
+           Total: 1 + 1 + 2 = 4 segs. */
+        check("mix collinear + off-trunk: 4 segs (1 trunk + 1 V + 2 H)",
               net && net->seg_count == 4);
         wire_geometry_release(&g);
     }
 
-    /* ── producer interior to consumer xs (some left, some right) ── */
+    /* ── all consumers collinear: H trunk only, no V bus ─────────── */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        vec2_t prod; prod.x = 0;   prod.y = 100;
+        vec2_t cs[2];
+        cs[0].x = 200; cs[0].y = 100;
+        cs[1].x = 300; cs[1].y = 100;
+        auto_route_net(&g, "co", prod, cs, 2);
+        const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "co"));
+        /* No off-trunk consumers → H trunk shortcut.
+           xs = {0, 200, 300}. 2 H segs. */
+        check("all-collinear: 2 trunk H segs (no V bus)",
+              net && net->seg_count == 2);
+        wire_geometry_release(&g);
+    }
+
+    /* ── producer interior to consumer xs ────────────────────────── */
     {
         wire_geometry_t g; wire_geometry_init(&g);
         vec2_t prod; prod.x = 200; prod.y = 100;
         vec2_t cs[2];
-        cs[0].x =   0; cs[0].y = 200;     /* to the LEFT of producer */
-        cs[1].x = 400; cs[1].y = 200;     /* to the RIGHT */
+        cs[0].x =   0; cs[0].y = 200;     /* LEFT of producer */
+        cs[1].x = 400; cs[1].y = 200;     /* RIGHT */
         auto_route_net(&g, "split", prod, cs, 2);
         const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "split"));
-        /* anchor_x[0] = snap((200+0)/2) = snap(100) = 104
-           anchor_x[1] = snap((200+400)/2) = snap(300) = 296
-           trunk xs: {104, 200, 296}. 2 trunk + 2 V + 2 H = 6 segs. */
-        check("producer interior: 6 segs (2 trunk + 2 V + 2 H stubs)",
-              net && net->seg_count == 6);
+        /* min_cx = 0. V_bus_x = snap((200+0)/2) = 104.
+           Trunk: (200, 100) → (104, 100). H going LEFT. 1 seg.
+           ys = {100, 200}. V bus: (104, 100)→(104, 200). 1 seg.
+           Stubs: (104, 200)→(0, 200) leftward,
+                  (104, 200)→(400, 200) rightward. 2 stubs.
+           Total: 1 + 1 + 2 = 4 segs. */
+        check("producer interior: 4 segs (1 trunk + 1 V + 2 H stubs)",
+              net && net->seg_count == 4);
         wire_geometry_release(&g);
     }
 
     /* ── replaces existing geometry (not append) ──────────────────── */
     {
         wire_geometry_t g; wire_geometry_init(&g);
-        /* Seed with some stale segments. */
         int idx = wire_geometry_get_or_create(&g, "r");
         wire_segment_t stale[] = { seg(0, 0, 100, 0) };
         wire_geometry_set_segments(&g, idx, stale, 1);
@@ -1065,7 +1106,7 @@ int main(void) {
         auto_route_net(&g, "r", prod, cs, 2);
         const wire_net_geom_t *net = wire_geometry_net(&g, wire_geometry_find(&g, "r"));
         check("auto_route_net replaces old geometry (not append)",
-              net && net->seg_count == 6);
+              net && net->seg_count == 5);
         wire_geometry_release(&g);
     }
 

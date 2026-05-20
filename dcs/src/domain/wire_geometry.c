@@ -458,76 +458,83 @@ int auto_route_net(wire_geometry_t *self, const char *wire_name,
 
     int eff_n = n < MAX_FANOUT ? n : MAX_FANOUT;
 
-    /* Steiner Z topology: per consumer, decide where it joins the trunk
-       and how the trunk-to-pin path looks.
+    /* Shared V-bus topology (R-8). Three pieces:
+       - H trunk from producer.x to V_bus_x at producer.y.
+       - One vertical bus at V_bus_x, broken at every unique y
+         (producer.y + every consumer.y).
+       - One H stub per consumer from (V_bus_x, c.y) to (c.x, c.y).
 
-         - cy == py:        consumer sits on the trunk; just extend the
-                            trunk to cx. No drop, no stub.
-         - cx == px:        consumer is directly below the producer;
-                            single V drop, no H stub.
-         - otherwise:       per-consumer Z arrival — V drop at a midpoint
-                            column (snap-to-grid), then a final H stub
-                            into the pin from the left or right. This is
-                            what the single-consumer Z-router does;
-                            multi-consumer mode shares the trunk while
-                            preserving each consumer's H approach. */
-    float anchor_x[MAX_FANOUT];
-    int   needs_v [MAX_FANOUT];
-    int   needs_h [MAX_FANOUT];
-
+       When every consumer is collinear with the producer (cy == py for
+       all), the V bus would degenerate to zero length, so we shortcut
+       to a single H trunk broken at each consumer.x — visually the
+       same and one segment cheaper. */
+    int any_off_trunk = 0;
     for (int i = 0; i < eff_n; i++) {
-        float cx = consumers[i].x, cy = consumers[i].y;
-        if (cy == producer.y) {
-            anchor_x[i] = cx;
-            needs_v[i]  = 0;
-            needs_h[i]  = 0;
-        } else if (cx == producer.x) {
-            anchor_x[i] = producer.x;
-            needs_v[i]  = 1;
-            needs_h[i]  = 0;
-        } else {
-            float mid = snap_to_grid(producer.x + (cx - producer.x) * 0.5f);
-            /* Same nudge as the single-consumer Z-router — never let
-               the H stub or trunk piece collapse to zero length. */
-            float dir = (cx > producer.x) ? ROUTING_GRID : -ROUTING_GRID;
-            if (mid == producer.x) mid += dir;
-            if (mid == cx)         mid -= dir;
-            anchor_x[i] = mid;
-            needs_v[i]  = 1;
-            needs_h[i]  = 1;
+        if (consumers[i].y != producer.y) { any_off_trunk = 1; break; }
+    }
+
+    if (!any_off_trunk) {
+        /* All-collinear: H trunk only, broken at each consumer.x. */
+        float xs[MAX_FANOUT + 1];
+        int n_xs = 0;
+        insert_sorted_unique(xs, &n_xs, producer.x);
+        for (int i = 0; i < eff_n; i++) {
+            insert_sorted_unique(xs, &n_xs, consumers[i].x);
         }
+        for (int i = 0; i + 1 < n_xs; i++) {
+            wire_segment_t h;
+            h.a.x = xs[i];     h.a.y = producer.y;
+            h.b.x = xs[i + 1]; h.b.y = producer.y;
+            wire_geometry_append_segments(self, net_idx, &h, 1);
+        }
+        return 0;
     }
 
-    /* Collect unique trunk-break xs: producer.x plus every anchor. */
-    float xs[MAX_FANOUT + 1];
-    int   n_xs = 0;
-    insert_sorted_unique(xs, &n_xs, producer.x);
-    for (int i = 0; i < eff_n; i++) {
-        insert_sorted_unique(xs, &n_xs, anchor_x[i]);
+    /* Shared V bus: pick V_bus_x as snap-midpoint(producer.x, leftmost cx).
+       For standard left-to-right flow this places the bus between the
+       producer and all consumers. For interior-producer cases (some
+       consumers to the left) the H stubs simply run in both directions
+       from V_bus_x — still topologically valid, may not be the prettiest
+       routing but doesn't corrupt anything. */
+    float min_cx = consumers[0].x;
+    for (int i = 1; i < eff_n; i++) {
+        if (consumers[i].x < min_cx) min_cx = consumers[i].x;
     }
+    float V_bus_x = snap_to_grid(producer.x + (min_cx - producer.x) * 0.5f);
+    float dir = (min_cx > producer.x) ? ROUTING_GRID : -ROUTING_GRID;
+    if (V_bus_x == producer.x) V_bus_x += dir;
+    if (V_bus_x == min_cx)     V_bus_x -= dir;
 
-    /* Trunk H segments between consecutive xs at producer.y. */
-    for (int i = 0; i + 1 < n_xs; i++) {
+    /* H trunk from producer to V_bus_x (skipped if zero-length). */
+    if (V_bus_x != producer.x) {
         wire_segment_t h;
-        h.a.x = xs[i];     h.a.y = producer.y;
-        h.b.x = xs[i + 1]; h.b.y = producer.y;
+        h.a.x = producer.x; h.a.y = producer.y;
+        h.b.x = V_bus_x;    h.b.y = producer.y;
         wire_geometry_append_segments(self, net_idx, &h, 1);
     }
 
-    /* Per-consumer V drop + H stub. */
+    /* V bus broken at every unique y: producer.y + each consumer's y. */
+    float ys[MAX_FANOUT + 1];
+    int n_ys = 0;
+    insert_sorted_unique(ys, &n_ys, producer.y);
     for (int i = 0; i < eff_n; i++) {
-        if (needs_v[i]) {
-            wire_segment_t v;
-            v.a.x = anchor_x[i]; v.a.y = producer.y;
-            v.b.x = anchor_x[i]; v.b.y = consumers[i].y;
-            wire_geometry_append_segments(self, net_idx, &v, 1);
-        }
-        if (needs_h[i]) {
-            wire_segment_t h;
-            h.a.x = anchor_x[i];      h.a.y = consumers[i].y;
-            h.b.x = consumers[i].x;    h.b.y = consumers[i].y;
-            wire_geometry_append_segments(self, net_idx, &h, 1);
-        }
+        insert_sorted_unique(ys, &n_ys, consumers[i].y);
+    }
+    for (int i = 0; i + 1 < n_ys; i++) {
+        wire_segment_t v;
+        v.a.x = V_bus_x; v.a.y = ys[i];
+        v.b.x = V_bus_x; v.b.y = ys[i + 1];
+        wire_geometry_append_segments(self, net_idx, &v, 1);
+    }
+
+    /* One H stub per consumer from (V_bus_x, c.y) to the pin. Skip
+       zero-length stubs (consumer happens to sit on the V bus). */
+    for (int i = 0; i < eff_n; i++) {
+        if (consumers[i].x == V_bus_x) continue;
+        wire_segment_t h;
+        h.a.x = V_bus_x;        h.a.y = consumers[i].y;
+        h.b.x = consumers[i].x; h.b.y = consumers[i].y;
+        wire_geometry_append_segments(self, net_idx, &h, 1);
     }
     return 0;
 }
