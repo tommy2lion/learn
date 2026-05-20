@@ -123,6 +123,15 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self);
    the widget's normal event flow. */
 void circuit_canvas_widget_reseat_wires(circuit_canvas_widget_t *self);
 
+/* Snap each component's y to align one of its input pins with its producer's
+   output pin, when the existing offset is within 8 px. Also aligns external
+   output positions to their producers. Returns the number of positions
+   actually changed — useful for callers that need to know whether the
+   file's persisted geometry is still valid (zero shifts) or has gone stale
+   (any shift). Idempotent: a second call on an already-aligned circuit
+   returns 0. (R-7 refinement) */
+int circuit_canvas_widget_auto_align(circuit_t *c);
+
 /* Highlight a net by wire name; NULL or empty string clears the highlight.
    The string is copied into the widget; the input pointer doesn't need to
    outlive the call. (Phase 6 — click-to-highlight) */

@@ -118,11 +118,16 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
     }
     if (app->circuit) circuit_destroy(app->circuit);
     app->circuit = c;
-    /* set_circuit auto-routes from connectivity. If the file carried explicit
-       geometry, install it after — overriding the auto-seed so user-tweaked
-       routes survive round-trip. */
+    /* Run auto-align BEFORE set_circuit so we know whether positions
+       were shifted. If yes, the file's persisted # @wires block was
+       routed against the OLD positions and is now stale — we must
+       keep the freshly-routed geometry from set_circuit's seed.
+       If zero shifts, the file's wires are consistent and we load
+       them (preserving any user Phase-12 bend-drags). */
+    int n_align_shifts = circuit_canvas_widget_auto_align(c);
+    /* set_circuit's internal auto_align is a no-op now (idempotent). */
     circuit_canvas_widget_set_circuit(app->circuit_canvas, c);
-    if (parsed_wires.net_count > 0) {
+    if (n_align_shifts == 0 && parsed_wires.net_count > 0) {
         circuit_canvas_widget_load_geometry(app->circuit_canvas, &parsed_wires);
     }
     wire_geometry_release(&parsed_wires);   /* no-op if moved */

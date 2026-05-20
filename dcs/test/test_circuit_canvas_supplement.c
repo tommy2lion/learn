@@ -1172,6 +1172,31 @@ int main(void) {
         circuit_destroy(c);
     }
 
+    /* ── circuit_canvas_widget_auto_align returns shift count ────── */
+    {
+        circuit_t *c = circuit_create();
+        circuit_add_input (c, "A");
+        circuit_add_output(c, "Y");
+        component_t *n1 = gate_not_create("Y");
+        circuit_add_component(c, n1, "A", NULL);
+        snprintf(c->output_names[0], DOMAIN_NAME_LEN, "%s", "Y");
+
+        c->input_positions[0]      = (vec2_t){0,   100};
+        c->components[0]->position = (vec2_t){200, 105};   /* 5 off */
+        c->output_positions[0]     = (vec2_t){400, 100};   /* aligned */
+
+        int n = circuit_canvas_widget_auto_align(c);
+        check("auto_align returns 1 (one component shifted)", n == 1);
+        check("idempotent: 2nd call returns 0",
+              circuit_canvas_widget_auto_align(c) == 0);
+        circuit_destroy(c);
+    }
+
+    /* ── auto_align(NULL) returns 0 safely ───────────────────────── */
+    {
+        check("auto_align(NULL) == 0", circuit_canvas_widget_auto_align(NULL) == 0);
+    }
+
     /* ── set_circuit also triggers auto-align (open another file) ── */
     {
         circuit_t *c1 = circuit_create();

@@ -307,8 +307,9 @@ static int fanout_of_wire(const circuit_t *c, const char *wire_name) {
     return n;
 }
 
-static void auto_align_components_to_trunks(circuit_t *c) {
-    if (!c) return;
+int circuit_canvas_widget_auto_align(circuit_t *c) {
+    if (!c) return 0;
+    int n_shifts = 0;
 
     /* Pass 1 — shift components so one input pin aligns with its producer. */
     for (int i = 0; i < c->component_count; i++) {
@@ -343,6 +344,7 @@ static void auto_align_components_to_trunks(circuit_t *c) {
 
         if (best_pin >= 0) {
             comp->position.y -= best_delta;
+            n_shifts++;
         }
     }
 
@@ -359,7 +361,10 @@ static void auto_align_components_to_trunks(circuit_t *c) {
         float abs_d = delta >= 0 ? delta : -delta;
         if (abs_d == 0 || abs_d > AUTO_ALIGN_THRESHOLD) continue;
         c->output_positions[i].y -= delta;
+        n_shifts++;
     }
+
+    return n_shifts;
 }
 
 /* (Re)build wire geometry from the current circuit's connectivity. Routes
@@ -1499,7 +1504,7 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
     wire_geometry_init(&cw->wires);
     if (c) {
         auto_layout(c);
-        auto_align_components_to_trunks(c);
+        circuit_canvas_widget_auto_align(c);
         seed_geometry_from_circuit(cw);
         circuit_canvas_widget_fit_view(cw);
         cw->counter_in   = c->input_count;
@@ -1514,7 +1519,7 @@ void circuit_canvas_widget_set_circuit(circuit_canvas_widget_t *self, circuit_t 
     circuit_canvas_widget_reset(self);
     if (c) {
         auto_layout(c);
-        auto_align_components_to_trunks(c);
+        circuit_canvas_widget_auto_align(c);
         seed_geometry_from_circuit(self);
         circuit_canvas_widget_fit_view(self);
         self->counter_in   = c->input_count;
