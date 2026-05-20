@@ -389,7 +389,7 @@ static void test_serialize_with_wires(void) {
     wire_geometry_set_segments(&g, a_idx,  a_segs, 2);
     wire_geometry_set_segments(&g, n1_idx, n_segs, 1);
 
-    char *text = circuit_io_serialize_ex(c, &g);
+    char *text = circuit_io_serialize_ex(c, &g, NULL);
     check("serialize_ex: returned non-NULL", text != NULL);
     if (text) {
         check("serialize_ex: contains '# @wires'",
@@ -431,13 +431,13 @@ static void test_round_trip_with_wires(void) {
     wire_geometry_set_segments(&g, a_idx,  a_segs, 2);
     wire_geometry_set_segments(&g, n1_idx, n_segs, 1);
 
-    char *text = circuit_io_serialize_ex(c, &g);
+    char *text = circuit_io_serialize_ex(c, &g, NULL);
     check("round-trip: serialize_ex returned non-NULL", text != NULL);
 
     /* Re-parse via _ex into a fresh circuit + geometry. */
     char err[128] = {0};
     wire_geometry_t g2; wire_geometry_init(&g2);
-    circuit_t *c2 = circuit_io_parse_ex(text, err, sizeof(err), &g2);
+    circuit_t *c2 = circuit_io_parse_ex(text, err, sizeof(err), &g2, NULL);
     check("round-trip: parse_ex returned non-NULL", c2 != NULL);
     free(text);
 
@@ -482,7 +482,7 @@ static void test_parse_wires_ascii_arrow(void) {
         "# @    h 60,0 \xe2\x86\x92 100,0\n";
     char err[128] = {0};
     wire_geometry_t g; wire_geometry_init(&g);
-    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g);
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g, NULL);
     check("ascii arrow: parse_ex succeeds", c != NULL);
     check("ascii arrow: net a parsed",     wire_geometry_find(&g, "a") >= 0);
     check("ascii arrow: net y parsed",     wire_geometry_find(&g, "y") >= 0);
@@ -505,7 +505,7 @@ static void test_parse_no_wires_block(void) {
         "# @  y = 200, 100\n";
     char err[128] = {0};
     wire_geometry_t g; wire_geometry_init(&g);
-    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g);
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), &g, NULL);
     check("no-wires: parse_ex succeeds",         c != NULL);
     check("no-wires: geometry stays empty",       g.net_count == 0);
     check("no-wires: layout still parsed",
@@ -527,13 +527,13 @@ static void test_parse_ex_with_null_geom(void) {
         "# @  net=a\n"
         "# @    h 0,0 -> 50,0\n";
     char err[128] = {0};
-    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL);
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL, NULL);
     check("parse_ex(geom=NULL): still parses circuit", c != NULL);
     if (c) circuit_destroy(c);
 }
 
 static void test_legacy_serialize_byte_identical(void) {
-    /* Confirm circuit_io_serialize(c) == circuit_io_serialize_ex(c, NULL). */
+    /* Confirm circuit_io_serialize(c) == circuit_io_serialize_ex(c, NULL, NULL). */
     circuit_t *c = circuit_create();
     circuit_add_input(c, "a");
     circuit_add_output(c, "y");
@@ -541,12 +541,211 @@ static void test_legacy_serialize_byte_identical(void) {
     circuit_add_component(c, n1, "a", NULL);
     snprintf(c->output_names[0], DOMAIN_NAME_LEN, "n1");
     char *legacy = circuit_io_serialize(c);
-    char *ex_null = circuit_io_serialize_ex(c, NULL);
+    char *ex_null = circuit_io_serialize_ex(c, NULL, NULL);
     check("legacy serialize == _ex(c, NULL)",
           legacy && ex_null && strcmp(legacy, ex_null) == 0);
     free(legacy);
     free(ex_null);
     circuit_destroy(c);
+}
+
+/* ── supplement Phase 10: display_mode / display_name / pin_style round-trip ── */
+
+/* Build inputs: D, CLK; outputs: Q. Output Q consumes a NOT(D). */
+static circuit_t *make_meta_test_circuit(void) {
+    circuit_t *c = circuit_create();
+    circuit_add_input (c, "D");
+    circuit_add_input (c, "CLK");
+    circuit_add_output(c, "Q");
+    component_t *n1 = gate_not_create("Q");
+    circuit_add_component(c, n1, "D", NULL);
+    return c;
+}
+
+static void test_serialize_meta_block(void) {
+    circuit_t *c = make_meta_test_circuit();
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    meta.display_mode = 1;                                        /* external */
+    snprintf(meta.display_name, sizeof(meta.display_name), "%s", "DFF");
+    meta.input_styles[1] = 1;                                     /* CLK = clock */
+
+    char *text = circuit_io_serialize_ex(c, NULL, &meta);
+    check("meta-serialize: non-NULL", text != NULL);
+    if (text) {
+        check("meta-serialize: emits display_mode = external",
+              strstr(text, "# @display_mode = external") != NULL);
+        check("meta-serialize: emits display_name = DFF",
+              strstr(text, "# @display_name = DFF") != NULL);
+        check("meta-serialize: emits pin_style for CLK",
+              strstr(text, "# @pin_style = __input:CLK : clock") != NULL);
+        check("meta-serialize: no pin_style line for un-styled D",
+              strstr(text, "__input:D :") == NULL);
+        free(text);
+    }
+    circuit_destroy(c);
+}
+
+static void test_meta_block_omitted_when_defaults(void) {
+    /* When meta is all zeros, the serializer should output nothing extra
+       — keep legacy files clean. */
+    circuit_t *c = make_meta_test_circuit();
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));    /* all defaults */
+    char *text = circuit_io_serialize_ex(c, NULL, &meta);
+    check("meta-default: serializer returns non-NULL", text != NULL);
+    if (text) {
+        check("meta-default: no # @display_mode line",
+              strstr(text, "# @display_mode") == NULL);
+        check("meta-default: no # @display_name line",
+              strstr(text, "# @display_name") == NULL);
+        check("meta-default: no # @pin_style line",
+              strstr(text, "# @pin_style") == NULL);
+        free(text);
+    }
+    circuit_destroy(c);
+}
+
+static void test_round_trip_meta(void) {
+    circuit_t *c = make_meta_test_circuit();
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    meta.display_mode    = 1;
+    snprintf(meta.display_name, sizeof(meta.display_name), "%s", "MyDFF");
+    meta.input_styles[1] = 1;                                     /* CLK clock */
+    meta.output_styles[0] = 2;                                    /* Q inverted */
+
+    char *text = circuit_io_serialize_ex(c, NULL, &meta);
+    check("rt-meta: serialize succeeds", text != NULL);
+
+    char err[128] = {0};
+    circuit_meta_t got;
+    memset(&got, 0xCC, sizeof(got));
+    /* Re-parse and pull the metadata back. We zero only after passing it
+       (the parser only writes the fields it found, so a defensive
+       caller-side memset(0) is part of the round-trip contract). */
+    memset(&got, 0, sizeof(got));
+    circuit_t *c2 = circuit_io_parse_ex(text, err, sizeof(err), NULL, &got);
+    check("rt-meta: parse succeeds", c2 != NULL);
+    free(text);
+
+    if (c2) {
+        check("rt-meta: display_mode preserved",      got.display_mode == 1);
+        check("rt-meta: display_name preserved",
+              strcmp(got.display_name, "MyDFF") == 0);
+        check("rt-meta: input[1] (CLK) is clock",     got.input_styles[1] == 1);
+        check("rt-meta: input[0] (D)   stays normal", got.input_styles[0] == 0);
+        check("rt-meta: output[0] (Q)  is inverted",  got.output_styles[0] == 2);
+        circuit_destroy(c2);
+    }
+    circuit_destroy(c);
+}
+
+static void test_meta_parse_legacy_file(void) {
+    /* A circuit file with NO metadata block parses fine and meta stays
+       at all-zero defaults. */
+    const char *src =
+        "inputs: a, b\n"
+        "outputs: y\n"
+        "\n"
+        "y = and(a, b)\n";
+    char err[128] = {0};
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL, &meta);
+    check("legacy file: parse succeeds",  c != NULL);
+    check("legacy file: display_mode == 0",  meta.display_mode == 0);
+    check("legacy file: display_name empty", meta.display_name[0] == '\0');
+    check("legacy file: pin styles all NORMAL",
+          meta.input_styles[0] == 0 && meta.output_styles[0] == 0);
+    if (c) circuit_destroy(c);
+}
+
+static void test_meta_parse_unknown_style_ignored(void) {
+    /* Unknown style word — parser silently ignores. */
+    const char *src =
+        "inputs: D, CLK\n"
+        "outputs: Q\n"
+        "\n"
+        "Q = not(D)\n"
+        "\n"
+        "# @pin_style = __input:CLK : tristate\n";   /* unknown style */
+    char err[128] = {0};
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL, &meta);
+    check("unknown style: parse still succeeds", c != NULL);
+    check("unknown style: input[1] stays NORMAL", meta.input_styles[1] == 0);
+    if (c) circuit_destroy(c);
+}
+
+static void test_meta_parse_unknown_pin_ignored(void) {
+    /* Style references a non-existent pin — silently ignored. */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "\n"
+        "y = not(a)\n"
+        "\n"
+        "# @pin_style = __input:GHOST : clock\n";
+    char err[128] = {0};
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL, &meta);
+    check("unknown pin: parse still succeeds", c != NULL);
+    int any_set = 0;
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        if (meta.input_styles[i] != 0 || meta.output_styles[i] != 0) {
+            any_set = 1; break;
+        }
+    }
+    check("unknown pin: no styles set", !any_set);
+    if (c) circuit_destroy(c);
+}
+
+static void test_meta_parse_after_layout_no_blank(void) {
+    /* Metadata annotations sit immediately after a # @layout block with
+       NO blank line between — the parser must still recognise them as
+       single-line annotations, not as layout entries. */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "\n"
+        "y = not(a)\n"
+        "\n"
+        "# @layout\n"
+        "# @  y = 100, 100\n"
+        "# @display_mode = external\n"
+        "# @display_name = NoBlank\n";
+    char err[128] = {0};
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    circuit_t *c = circuit_io_parse_ex(src, err, sizeof(err), NULL, &meta);
+    check("post-layout no-blank: parse succeeds",         c != NULL);
+    check("post-layout no-blank: display_mode parsed",     meta.display_mode == 1);
+    check("post-layout no-blank: display_name parsed",
+          strcmp(meta.display_name, "NoBlank") == 0);
+    check("post-layout no-blank: layout still applied",
+          c && c->components[0]->position.x == 100);
+    if (c) circuit_destroy(c);
+}
+
+static void test_meta_legacy_parse_ignores_meta(void) {
+    /* legacy circuit_io_parse (no _ex) should still succeed on a file
+       that contains metadata, just dropping the data on the floor. */
+    const char *src =
+        "inputs: a\n"
+        "outputs: y\n"
+        "\n"
+        "y = not(a)\n"
+        "\n"
+        "# @display_mode = external\n"
+        "# @display_name = Foo\n"
+        "# @pin_style = __input:a : clock\n";
+    char err[128] = {0};
+    circuit_t *c = circuit_io_parse(src, err, sizeof(err));
+    check("legacy parse with meta: still succeeds", c != NULL);
+    if (c) circuit_destroy(c);
 }
 
 int main(void) {
@@ -573,6 +772,15 @@ int main(void) {
     test_parse_no_wires_block();
     test_parse_ex_with_null_geom();
     test_legacy_serialize_byte_identical();
+    /* Supplement Phase 10 */
+    test_serialize_meta_block();
+    test_meta_block_omitted_when_defaults();
+    test_round_trip_meta();
+    test_meta_parse_legacy_file();
+    test_meta_parse_unknown_style_ignored();
+    test_meta_parse_unknown_pin_ignored();
+    test_meta_parse_after_layout_no_blank();
+    test_meta_legacy_parse_ignores_meta();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

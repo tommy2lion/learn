@@ -110,6 +110,92 @@ static circuit_t *fail(circuit_t *c, char *err_out, int err_len,
     return NULL;
 }
 
+/* Map a pin-style word to the persistent int code. Returns -1 if unknown
+   (forward-compatible: the parser silently ignores it). */
+static int pin_style_from_word(const char *w) {
+    if (strcmp(w, "normal")   == 0) return 0;
+    if (strcmp(w, "clock")    == 0) return 1;
+    if (strcmp(w, "inverted") == 0) return 2;
+    return -1;
+}
+
+static const char *pin_style_to_word(int style) {
+    switch (style) {
+        case 1:  return "clock";
+        case 2:  return "inverted";
+        default: return "normal";
+    }
+}
+
+/* Parse "# @display_mode = internal" / "external". Tail is the text
+   after "# @display_mode". Unknown values are silently ignored. */
+static void parse_display_mode_line(const char *tail, circuit_meta_t *m) {
+    const char *eq = strchr(tail, '=');
+    if (!eq) return;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.*s", (int)(sizeof(buf) - 1), eq + 1);
+    str_trim(buf);
+    if      (strcmp(buf, "internal") == 0) m->display_mode = 0;
+    else if (strcmp(buf, "external") == 0) m->display_mode = 1;
+}
+
+/* Parse "# @display_name = <freeform>". Tail is the text after the
+   "# @display_name" prefix. */
+static void parse_display_name_line(const char *tail, circuit_meta_t *m) {
+    const char *eq = strchr(tail, '=');
+    if (!eq) return;
+    char buf[DOMAIN_NAME_LEN];
+    snprintf(buf, sizeof(buf), "%.*s", (int)(sizeof(buf) - 1), eq + 1);
+    str_trim(buf);
+    snprintf(m->display_name, sizeof(m->display_name), "%s", buf);
+}
+
+/* Parse "# @pin_style = __input:NAME : style" or "__output:NAME : style".
+   Tail is the text after "# @pin_style". Looks up the named pin in the
+   circuit and writes the corresponding style code into meta. Unknown
+   pin names or style words are silently ignored. */
+static void parse_pin_style_line(const circuit_t *c, const char *tail,
+                                 circuit_meta_t *m) {
+    const char *eq = strchr(tail, '=');
+    if (!eq) return;
+    char rhs[160];
+    snprintf(rhs, sizeof(rhs), "%.*s", (int)(sizeof(rhs) - 1), eq + 1);
+    str_trim(rhs);
+
+    /* The pin-reference uses "__input:" or "__output:" — the colon there
+       is part of the pin reference, so we look for the LAST colon, which
+       separates the pin reference from the style word. */
+    char *style_colon = strrchr(rhs, ':');
+    if (!style_colon) return;
+    *style_colon = '\0';
+    char *pin_ref    = rhs;
+    char *style_word = style_colon + 1;
+    str_trim(pin_ref);
+    str_trim(style_word);
+
+    int style = pin_style_from_word(style_word);
+    if (style < 0) return;
+
+    if (strncmp(pin_ref, "__input:", 8) == 0) {
+        const char *name = pin_ref + 8;
+        for (int i = 0; i < c->input_count && i < DOMAIN_MAX_IO; i++) {
+            if (strcmp(c->input_names[i], name) == 0) {
+                m->input_styles[i] = style;
+                return;
+            }
+        }
+    } else if (strncmp(pin_ref, "__output:", 9) == 0) {
+        const char *name = pin_ref + 9;
+        for (int i = 0; i < c->output_count && i < DOMAIN_MAX_IO; i++) {
+            if (strcmp(c->output_names[i], name) == 0) {
+                m->output_styles[i] = style;
+                return;
+            }
+        }
+    }
+    /* Unknown pin: silently ignored (forward-compatible). */
+}
+
 /* Parse one wires-block entry. Two forms are accepted:
      "net=<wire_name>"             — switch to a new (or existing) net.
      "h x1,y1 → x2,y2"            — append H segment to the current net.
@@ -212,11 +298,12 @@ static void parse_layout_entry(circuit_t *c, const char *body) {
 /* ── public: parse ───────────────────────────────────────────────── */
 
 circuit_t *circuit_io_parse(const char *text, char *err_out, int err_len) {
-    return circuit_io_parse_ex(text, err_out, err_len, NULL);
+    return circuit_io_parse_ex(text, err_out, err_len, NULL, NULL);
 }
 
 circuit_t *circuit_io_parse_ex(const char *text, char *err_out, int err_len,
-                               wire_geometry_t *geom_out) {
+                               wire_geometry_t *geom_out,
+                               circuit_meta_t  *meta_out) {
     if (err_out && err_len > 0) err_out[0] = '\0';
 
     circuit_t *c = circuit_create();
@@ -249,6 +336,32 @@ circuit_t *circuit_io_parse_ex(const char *text, char *err_out, int err_len,
                 in_layout = 0;
                 in_wires  = 1;
                 wires_current_net = -1;
+                continue;
+            }
+            /* ── Phase-10 single-line annotations. They unconditionally
+               terminate any prior @-block (so they may sit immediately
+               after a # @layout or # @wires block with or without a
+               blank line in between). Tail is `line + N` where N is the
+               length of "# @<keyword>". */
+            if (strncmp(line, "# @display_mode", 15) == 0
+                && (line[15] == '\0' || line[15] == ' '
+                    || line[15] == '\t' || line[15] == '=')) {
+                if (meta_out) parse_display_mode_line(line + 15, meta_out);
+                in_layout = 0; in_wires = 0;
+                continue;
+            }
+            if (strncmp(line, "# @display_name", 15) == 0
+                && (line[15] == '\0' || line[15] == ' '
+                    || line[15] == '\t' || line[15] == '=')) {
+                if (meta_out) parse_display_name_line(line + 15, meta_out);
+                in_layout = 0; in_wires = 0;
+                continue;
+            }
+            if (strncmp(line, "# @pin_style", 12) == 0
+                && (line[12] == '\0' || line[12] == ' '
+                    || line[12] == '\t' || line[12] == '=')) {
+                if (meta_out) parse_pin_style_line(c, line + 12, meta_out);
+                in_layout = 0; in_wires = 0;
                 continue;
             }
             /* "# @  name = x, y" while in layout mode → position entry */
@@ -363,7 +476,7 @@ static int has_layout_data(const circuit_t *c) {
 }
 
 char *circuit_io_serialize(const circuit_t *c) {
-    return circuit_io_serialize_ex(c, NULL);
+    return circuit_io_serialize_ex(c, NULL, NULL);
 }
 
 /* True if any net in geom has at least one segment. */
@@ -375,7 +488,22 @@ static int has_any_wires(const wire_geometry_t *geom) {
     return 0;
 }
 
-char *circuit_io_serialize_ex(const circuit_t *c, const wire_geometry_t *geom) {
+/* True if meta has anything worth emitting. The serializer omits the
+   block entirely when every field is at its default. */
+static int has_any_meta(const circuit_t *c, const circuit_meta_t *meta) {
+    if (!meta) return 0;
+    if (meta->display_mode != 0)   return 1;
+    if (meta->display_name[0])      return 1;
+    for (int i = 0; i < c->input_count && i < DOMAIN_MAX_IO; i++)
+        if (meta->input_styles[i] != 0) return 1;
+    for (int i = 0; i < c->output_count && i < DOMAIN_MAX_IO; i++)
+        if (meta->output_styles[i] != 0) return 1;
+    return 0;
+}
+
+char *circuit_io_serialize_ex(const circuit_t *c,
+                              const wire_geometry_t *geom,
+                              const circuit_meta_t  *meta) {
     /* Estimate extra capacity for the optional # @wires block. */
     int wires_extra = 0;
     if (has_any_wires(geom)) {
@@ -385,9 +513,13 @@ char *circuit_io_serialize_ex(const circuit_t *c, const wire_geometry_t *geom) {
             wires_extra += geom->nets[i].seg_count * 72;
         }
     }
+    /* Loose upper bound for the metadata annotations. */
+    int meta_extra = has_any_meta(c, meta)
+                   ? 64 + DOMAIN_NAME_LEN + 96 * (c->input_count + c->output_count)
+                   : 0;
     int cap = 4096 + c->component_count * 256
             + (c->input_count + c->output_count) * 96
-            + wires_extra;
+            + wires_extra + meta_extra;
     char *buf = (char *)malloc(cap);
     if (!buf) return NULL;
     int pos = 0;
@@ -455,6 +587,34 @@ char *circuit_io_serialize_ex(const circuit_t *c, const wire_geometry_t *geom) {
                                 seg->a.x, seg->a.y,
                                 seg->b.x, seg->b.y);
             }
+        }
+    }
+
+    /* Optional metadata block (supplement Phase 10). Emits only the fields
+       that differ from their defaults so legacy files stay clean. */
+    if (has_any_meta(c, meta)) {
+        pos += snprintf(buf + pos, cap - pos, "\n");
+        if (meta->display_mode != 0) {
+            pos += snprintf(buf + pos, cap - pos,
+                            "# @display_mode = external\n");
+        }
+        if (meta->display_name[0]) {
+            pos += snprintf(buf + pos, cap - pos,
+                            "# @display_name = %s\n", meta->display_name);
+        }
+        for (int i = 0; i < c->input_count && i < DOMAIN_MAX_IO; i++) {
+            if (meta->input_styles[i] == 0) continue;
+            pos += snprintf(buf + pos, cap - pos,
+                            "# @pin_style = __input:%s : %s\n",
+                            c->input_names[i],
+                            pin_style_to_word(meta->input_styles[i]));
+        }
+        for (int i = 0; i < c->output_count && i < DOMAIN_MAX_IO; i++) {
+            if (meta->output_styles[i] == 0) continue;
+            pos += snprintf(buf + pos, cap - pos,
+                            "# @pin_style = __output:%s : %s\n",
+                            c->output_names[i],
+                            pin_style_to_word(meta->output_styles[i]));
         }
     }
     return buf;

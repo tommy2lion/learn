@@ -33,34 +33,84 @@ static void on_canvas_status(const char *msg, void *user) {
     set_status((dcs_app_t *)user, "%s", msg);
 }
 
-/* Extract the file basename (no directory, no .dcs extension) and feed it
-   to the canvas for use as the external-view box label. (Phase 8) */
-static void apply_display_name_from_path(dcs_app_t *app, const char *path) {
-    if (!path || !path[0]) {
-        circuit_canvas_widget_set_display_name(app->circuit_canvas, "");
-        return;
-    }
+/* Strip directory and ".dcs" extension. dst must be at least DOMAIN_NAME_LEN
+   bytes. Empty-input safe — writes "" to dst. */
+static void extract_basename(const char *path, char *dst, int dst_len) {
+    if (!dst || dst_len <= 0) return;
+    dst[0] = '\0';
+    if (!path || !path[0]) return;
     const char *base = path;
     for (const char *p = path; *p; p++) {
         if (*p == '/' || *p == '\\') base = p + 1;
     }
-    char buf[DOMAIN_NAME_LEN];
-    snprintf(buf, sizeof(buf), "%s", base);
-    int n = (int)strlen(buf);
-    if (n >= 4 && strcmp(buf + n - 4, ".dcs") == 0) {
-        buf[n - 4] = '\0';
+    snprintf(dst, dst_len, "%s", base);
+    int n = (int)strlen(dst);
+    if (n >= 4 && strcmp(dst + n - 4, ".dcs") == 0) {
+        dst[n - 4] = '\0';
     }
+}
+
+/* Extract the file basename (no directory, no .dcs extension) and feed it
+   to the canvas for use as the external-view box label. (Phase 8) */
+static void apply_display_name_from_path(dcs_app_t *app, const char *path) {
+    char buf[DOMAIN_NAME_LEN];
+    extract_basename(path, buf, sizeof(buf));
     circuit_canvas_widget_set_display_name(app->circuit_canvas, buf);
+}
+
+/* Pack the canvas's external metadata into a persistable circuit_meta_t
+   for the save path. display_name is omitted (left empty) when it equals
+   the file basename — that way renaming the file changes the visible
+   label rather than the file silently re-asserting the old name. (Phase 10) */
+static void pack_meta_for_save(const dcs_app_t *app, circuit_meta_t *meta) {
+    memset(meta, 0, sizeof(*meta));
+    meta->display_mode =
+        (int)circuit_canvas_widget_display_mode(app->circuit_canvas);
+    external_view_metadata_t *em =
+        circuit_canvas_widget_external_meta(app->circuit_canvas);
+    char basename[DOMAIN_NAME_LEN];
+    extract_basename(app->file_path, basename, sizeof(basename));
+    if (em->display_name[0] && strcmp(em->display_name, basename) != 0) {
+        snprintf(meta->display_name, sizeof(meta->display_name),
+                 "%s", em->display_name);
+    }
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        meta->input_styles[i]  = (int)em->input_styles[i];
+        meta->output_styles[i] = (int)em->output_styles[i];
+    }
 }
 
 /* ── file actions ────────────────────────────────────────────────── */
 
+/* Copy parsed metadata into the canvas widget. Called after set_circuit
+   (which resets external_meta to defaults), so any non-default value
+   in the file overrides the defaults. (Phase 10) */
+static void apply_meta_from_load(dcs_app_t *app, const circuit_meta_t *meta) {
+    if (!meta) return;
+    circuit_canvas_widget_set_display_mode(app->circuit_canvas,
+        (display_mode_t)meta->display_mode);
+    if (meta->display_name[0]) {
+        /* File-supplied name overrides the basename. */
+        circuit_canvas_widget_set_display_name(app->circuit_canvas,
+                                               meta->display_name);
+    }
+    external_view_metadata_t *em =
+        circuit_canvas_widget_external_meta(app->circuit_canvas);
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        em->input_styles[i]  = (pin_style_t)meta->input_styles[i];
+        em->output_styles[i] = (pin_style_t)meta->output_styles[i];
+    }
+}
+
 static void load_circuit_from_text(dcs_app_t *app, const char *path, const char *text) {
     char err[256] = {0};
-    /* Extract any persisted # @wires block alongside the circuit. */
+    /* Extract any persisted # @wires block and metadata alongside the circuit. */
     wire_geometry_t parsed_wires;
     wire_geometry_init(&parsed_wires);
-    circuit_t *c = circuit_io_parse_ex(text, err, sizeof(err), &parsed_wires);
+    circuit_meta_t parsed_meta;
+    memset(&parsed_meta, 0, sizeof(parsed_meta));
+    circuit_t *c = circuit_io_parse_ex(text, err, sizeof(err),
+                                       &parsed_wires, &parsed_meta);
     if (!c) {
         wire_geometry_release(&parsed_wires);
         set_status(app, "Parse error: %s", err);
@@ -80,7 +130,10 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
     input_panel_set_circuit(app->input_panel, c);
     snprintf(app->file_path, sizeof(app->file_path), "%s", path);
     app->path_is_explicit = 1;
+    /* Seed the display name from the basename; the file's # @display_name,
+       if present, will override below in apply_meta_from_load. */
     apply_display_name_from_path(app, path);
+    apply_meta_from_load(app, &parsed_meta);
     set_status(app, "Opened %s", path);
 }
 
@@ -116,22 +169,28 @@ static void action_open(dcs_app_t *app) {
 static void action_save_as(dcs_app_t *app) {
     char path[DCS_APP_FILE_PATH_LEN] = {0};
     if (!app->platform->save_file(app->platform->self, "Save .dcs", path, sizeof(path))) return;
+    /* Update file_path BEFORE packing meta so the basename comparison
+       in pack_meta_for_save uses the new filename. */
+    snprintf(app->file_path, sizeof(app->file_path), "%s", path);
+    app->path_is_explicit = 1;
     const wire_geometry_t *geom = circuit_canvas_widget_geometry(app->circuit_canvas);
-    char *text = circuit_io_serialize_ex(app->circuit, geom);
+    circuit_meta_t meta;
+    pack_meta_for_save(app, &meta);
+    char *text = circuit_io_serialize_ex(app->circuit, geom, &meta);
     if (!text) { set_status(app, "Serialize failed"); return; }
     int n = (int)strlen(text);
     int rc = app->platform->write_file(app->platform->self, path, text, n);
     free(text);
     if (rc != 0) { set_status(app, "Save failed"); return; }
-    snprintf(app->file_path, sizeof(app->file_path), "%s", path);
-    app->path_is_explicit = 1;
     set_status(app, "Saved to %s", path);
 }
 
 static void action_save(dcs_app_t *app) {
     if (!app->path_is_explicit) { action_save_as(app); return; }
     const wire_geometry_t *geom = circuit_canvas_widget_geometry(app->circuit_canvas);
-    char *text = circuit_io_serialize_ex(app->circuit, geom);
+    circuit_meta_t meta;
+    pack_meta_for_save(app, &meta);
+    char *text = circuit_io_serialize_ex(app->circuit, geom, &meta);
     if (!text) { set_status(app, "Serialize failed"); return; }
     int n = (int)strlen(text);
     int rc = app->platform->write_file(app->platform->self, app->file_path, text, n);
