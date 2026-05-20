@@ -235,6 +235,211 @@ Bundle with Step 3 Phase 3.1 / 3.3.
 
 ---
 
+## R-7 — Network type classification + per-pin orientation case enumeration
+
+**Observation (user feedback, Phase 13 review).** A more complete way
+to think about wire routing is to classify each net by its **producer
+pin orientation** and then enumerate the cases for each combination
+of (network type) × (consumer pin orientation + relative position).
+
+R-6 sketched the pin-orientation idea but didn't enumerate the cases.
+This is the comprehensive model:
+
+### Network types
+
+- **Horizontal network.** Producer pin emerges horizontally (LEFT or
+  RIGHT facing on the gate body). The natural trunk is a horizontal
+  bus at the producer's y.
+- **Vertical network.** Producer pin emerges vertically (TOP or BOTTOM
+  facing). The natural trunk transitions from a vertical segment off
+  the producer pin to a horizontal bus, then the rest behaves as a
+  horizontal network.
+
+### Cases for a horizontal network reaching consumers
+
+**(1-1) Consumer pin is horizontal** (the common case today).
+Pull a tap from the horizontal trunk: V drop at an anchor column, H
+stub into the pin. **Implemented in `b2832c1`.**
+
+**(1-2) Consumer pin is vertical** — six sub-cases depending on whether
+the pin is on the top or bottom of its component AND where the trunk
+sits vertically relative to the pin:
+
+| Sub-case | Pin location | Trunk vs pin Y | Topology |
+|---|---|---|---|
+| 1-2-1 | Top of component | Trunk **above** pin | V drop directly down into the pin |
+| 1-2-2 | Top of component | Trunk **below** pin | V up from trunk, H across, V down into pin |
+| 1-2-3 | Top of component | Trunk **level** with pin | V up, H across, V down (a small loop) |
+| 1-2-4 | Bottom of component | Trunk **above** pin | V down from trunk, H across, V up into pin (inverse of 1-2-2) |
+| 1-2-5 | Bottom of component | Trunk **below** pin | V up from trunk into the pin |
+| 1-2-6 | Bottom of component | Trunk **level** with pin | V down, H across, V up (inverse of 1-2-3) |
+
+Sub-cases 1-2-3 and 1-2-6 are the trickiest (need a three-bend
+detour because the trunk is exactly at the pin's y but on the wrong
+side of the component body).
+
+### Vertical network: transition then reuse
+
+For (2) **vertical networks**, the producer's V segment terminates at
+a chosen y, then a horizontal trunk extends from that point — and the
+rest of the routing reuses the horizontal-network logic above.
+
+### Scope estimate
+
+Once pin orientation is first-class (R-6 Option B), the router needs
+a single dispatch on (network type, consumer pin orientation, relative
+position) — about a dozen branches, each emitting 1–3 segments.
+Implementation roughly the size of the current `auto_route_net` plus
+shape-DSL hooks (Step 3 Phase 3.1). Major refactor; bundle with
+Step 3.
+
+**Connected to.** R-6 (pin orientation is the prerequisite), R-8
+(shared vertical bus changes how multi-consumer cases assemble).
+
+---
+
+## R-8 — Shared vertical bus per net
+
+**Observation
+([`issues/202605201546-issue-there-should-be-a-vertical-bus.png`](../issues/202605201546-issue-there-should-be-a-vertical-bus.png)).**
+The current Steiner-Z router gives each off-trunk consumer its own
+**anchor column** (V drop at `snap-midpoint(producer.x, consumer.x)`).
+For a fan-out to three consumers at distinct y values, you get three
+separate V drops at three different x columns — visually busy.
+
+A cleaner topology: **one shared vertical bus** per net.
+
+```
+producer ───┬─────────────  (horizontal trunk)
+            │
+            ┝──── consumer A (above-trunk)
+            │
+            ┝──── consumer B (level, via short stub)
+            │
+            ┕──── consumer C (below-trunk)
+
+            ↑
+            shared V bus at one carefully-chosen x
+```
+
+The V bus extends up from the trunk to cover the highest off-trunk
+consumer, and down to cover the lowest. Each off-trunk consumer's
+final H stub branches off the V bus at the consumer's own y.
+
+### Where to place the V bus
+
+The user's two constraints:
+
+1. **Must not overlap with other V lines** (from this net OR neighbouring
+   nets). Two V buses at the same x would render on top of each other
+   and look like one wire.
+2. **At least to the LEFT of every consumer's x** (so every H stub
+   goes rightward from bus → consumer, consistent direction).
+
+A simple heuristic: `V_bus_x = snap-to-grid(min(consumer.x) -
+margin)`, plus a per-net offset to avoid collision with other nets'
+V buses.
+
+### Effect on junction-dot derivation
+
+The shared V bus changes the junction topology:
+
+- The point where the H trunk meets the V bus is a degree-3 T-join →
+  one junction dot.
+- Each H stub attaches to the V bus mid-segment, but in the
+  current `wire_geometry_junctions` rule, that only counts as a
+  junction if the V bus is **split** at each consumer's y (so the
+  H stub's a-endpoint sits on a V-segment endpoint, not mid-segment).
+- So the V bus needs to be emitted as **multiple V segments**, broken
+  at each off-trunk consumer's y — same trick as the H trunk's
+  breaks-at-anchor-x today.
+
+### Implementation impact
+
+`auto_route_net` would gain a per-net V-bus-x decision step, then
+emit:
+
+- One or more H trunk segments at producer.y (broken at the V bus's x).
+- Multiple V bus segments at V_bus_x (broken at each off-trunk
+  consumer's y).
+- One H stub per off-trunk consumer from `(V_bus_x, cy)` to
+  `(consumer.x, cy)`.
+
+### Cons / open questions
+
+- **Net-collision detection.** "Don't overlap with other nets' V lines"
+  requires the router to know about other nets — currently each net
+  routes independently. A per-canvas allocator of V-bus columns would
+  be needed.
+- **Phase-12 drag.** Moving the shared V bus would affect every
+  consumer's stub. Currently the bend-drag refuses fan-out shifts;
+  with a shared bus the drag could move all stubs together (probably
+  desirable).
+
+**Connected to.** R-7 (case enumeration assumes a clean trunk + bus
+structure). Step 3 Phase 3.1 (shape DSL) would also need to know
+about the bus to do collision-aware placement.
+
+**Scope estimate.** Medium. Touches `auto_route_net` significantly,
+adds a per-canvas V-bus-x registry, updates the junction renderer's
+expectations. Maybe 200–300 LOC + tests.
+
+---
+
+## R-9 — Feedback circuits (output → earlier-stage input)
+
+**Observation (user, Phase 13 review).** Real digital circuits often
+include **feedback** — the output of a later stage drives the input
+of an earlier stage. Examples:
+
+- Latches / flip-flops feedback their Q output to gate inputs internally.
+- Oscillators / ring oscillators.
+- State machines whose next-state logic depends on current state.
+
+The current routing assumes left-to-right signal flow: producer
+typically at a smaller x than its consumers, trunk extends to the
+right. Feedback wires reverse this — a producer at large x feeds a
+consumer at smaller x.
+
+### What works today
+
+`auto_route_net` (after R-6's Steiner-Z fix) already handles
+producers with consumers to the **left** — the trunk lo / hi span
+both directions (`producer_interior` test case). So a feedback wire
+between two components horizontally renders correctly.
+
+### What probably needs revision
+
+- **Routing aesthetics.** A feedback wire that goes from right to
+  left would benefit from a more deliberate path — typically routed
+  along the top or bottom of the schematic to avoid crossing the
+  forward signal flow.
+- **Layout.** `auto_layout` currently uses topological depth ordering,
+  which doesn't terminate cleanly when feedback creates cycles. Today
+  the parser explicitly rejects feedback (`circuit_add_component`
+  requires the input wires to already exist). A real DCS supporting
+  feedback needs:
+  - Cycle-aware layout (Sugiyama-like layered drawing with feedback
+    arrows).
+  - Simulation handling — `circuit_evaluate` today walks components
+    in topological order, which is undefined for cycles.
+
+### What to do
+
+This is **Step 3+ work** — feedback needs a stateful primitive
+(D-FF, register) to break the combinational loop, plus a sequential
+simulator that handles state evolution step by step. The router
+refinement is the smaller piece; the simulator + parser + layout
+changes are the bulk.
+
+For Step 2 supplement: feedback is **explicitly out of scope** and
+acknowledged here so future work has a placeholder.
+
+**Connected to.** Step 3 Phase 3.4 (stateful primitives like CLK and
+flip-flops introduce the need for proper feedback handling).
+
+---
+
 ## Out of scope / explicitly deferred
 
 The remaining stretch goal from the implementation plan:
