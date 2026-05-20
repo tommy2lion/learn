@@ -14,6 +14,7 @@
 #define PIN_HIT  9.0f
 #define WIRE_HIT 5
 #define DOT_R    3.0f      /* junction-dot radius (supplement Phase 5) */
+#define BUBBLE_R 5.0f      /* NOT-gate output bubble radius (Phase 11) */
 
 #define X_OFFSET 100.0f
 #define X_STEP   180.0f
@@ -692,22 +693,64 @@ static void draw_node(igraph_t *g, const circuit_t *c, node_ref_t r, int hovered
         if (hovered)  g->draw_circle_lines(g->self, p, IO_R + 2, 1.5f, COLOR_BLUE);
     } else if (r.kind == NODE_COMPONENT) {
         component_t *comp = c->components[r.index];
+        component_kind_t kind = component_kind(comp);
         rect_t box = { p.x - GATE_W / 2, p.y - GATE_H / 2, GATE_W, GATE_H };
-        g->draw_rect      (g->self, box, COLOR_WHITE);
-        g->draw_rect_lines(g->self, box, 2.0f, COLOR_BLACK);
 
-        /* gate name in upper-case */
-        const char *kn = component_kind_name(component_kind(comp));
-        char up[8] = {0};
-        for (int i = 0; kn[i] && i < 7; i++) up[i] = (char)toupper((unsigned char)kn[i]);
-        float tw = g->measure_text(g->self, up, 18);
-        g->draw_text(g->self, up, (vec2_t){p.x - tw / 2, p.y - 9}, 18, COLOR_BLACK);
+        /* Body — IEC-style rectangle for AND / OR / chipsets; ANSI-style
+           triangle with output bubble for NOT. (supplement Phase 11) */
+        if (kind == COMP_NOT) {
+            /* Triangle: apex on the right (just inside the bubble), base on
+               the left edge. Outline-only (no fill primitive available);
+               wires terminate at the right edge of the bubble = the existing
+               node_output_pin position, so wire-routing is unaffected. */
+            float left   = p.x - GATE_W / 2;
+            float top    = p.y - GATE_H / 2;
+            float bot    = p.y + GATE_H / 2;
+            vec2_t apex  = { p.x + GATE_W / 2 - BUBBLE_R * 2.0f, p.y };
+            vec2_t tl    = { left, top };
+            vec2_t bl    = { left, bot };
+            g->draw_line(g->self, tl, bl,    2.0f, COLOR_BLACK);
+            g->draw_line(g->self, tl, apex,  2.0f, COLOR_BLACK);
+            g->draw_line(g->self, bl, apex,  2.0f, COLOR_BLACK);
+            /* Output bubble — white fill so it punches a clean hole through
+               any wire that ends here; then the outline on top. */
+            vec2_t bubble = { p.x + GATE_W / 2 - BUBBLE_R, p.y };
+            g->draw_circle      (g->self, bubble, BUBBLE_R,         COLOR_WHITE);
+            g->draw_circle_lines(g->self, bubble, BUBBLE_R, 1.5f,   COLOR_BLACK);
+        } else {
+            g->draw_rect      (g->self, box, COLOR_WHITE);
+            g->draw_rect_lines(g->self, box, 2.0f, COLOR_BLACK);
+            /* IEC glyph: '&' for AND, '≥1' for OR. Fallback to the kind name
+               (uppercase) for unknown kinds — chipsets / future primitives.
+               If the runtime font lacks '≥' the OR gate will show a tofu
+               box; switch to "OR" if that becomes a problem. */
+            const char *glyph;
+            float       glyph_size;
+            char        fallback[8] = {0};
+            switch (kind) {
+                case COMP_AND: glyph = "&";                    glyph_size = 22.0f; break;
+                case COMP_OR:  glyph = "\xe2\x89\xa5""1";      glyph_size = 18.0f; break;
+                default: {
+                    const char *kn = component_kind_name(kind);
+                    for (int i = 0; kn[i] && i < 7; i++)
+                        fallback[i] = (char)toupper((unsigned char)kn[i]);
+                    glyph = fallback;
+                    glyph_size = 16.0f;
+                } break;
+            }
+            float gw = g->measure_text(g->self, glyph, glyph_size);
+            g->draw_text(g->self, glyph,
+                         (vec2_t){p.x - gw / 2, p.y - glyph_size / 2},
+                         glyph_size, COLOR_BLACK);
+        }
 
-        /* pins */
+        /* pins — NOT's output is visually represented by the bubble itself,
+           so skip the duplicate small circle there. */
         int n_in = component_pin_count_in(comp);
         for (int j = 0; j < n_in; j++)
             g->draw_circle(g->self, node_input_pin(c, r, j), PIN_R, COLOR_BLACK);
-        g->draw_circle(g->self, node_output_pin(c, r), PIN_R, COLOR_BLACK);
+        if (kind != COMP_NOT)
+            g->draw_circle(g->self, node_output_pin(c, r), PIN_R, COLOR_BLACK);
 
         /* instance name above the box */
         float lw = g->measure_text(g->self, comp->name, 12);
