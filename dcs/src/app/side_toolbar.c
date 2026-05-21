@@ -9,8 +9,10 @@
 #define HPAD          12     /* horizontal padding inside the sidebar */
 #define BTN_H         40
 #define BTN_FONT      15
-#define VIEW_BTN_H    32     /* the black-box-toggle row at the bottom */
-#define VIEW_BTN_PAD  10     /* gap above the toggle button             */
+#define VIEW_BTN_H    38     /* the black-box-toggle row at the bottom (R-2: bumped from 32) */
+#define VIEW_BTN_PAD  14     /* gap above the toggle button (R-2: was 10) */
+#define VIEW_BTN_FONT 17     /* slightly bigger than place-button label so the toggle reads as "different" (R-2) */
+#define VIEW_BORDER_THICK 2  /* thicker border for emphasis (R-2) */
 
 typedef struct tagt_stb_item { float y; const char *label; place_kind_t kind; } stb_item_t;
 
@@ -81,24 +83,34 @@ static void stb_draw(widget_t *self, igraph_t *g) {
                      BTN_FONT, COLOR_WHITE);
     }
 
-    /* Black-box / schematic toggle (Phase 8). Label shows the CURRENT mode
-       with a square-bracket marker; the background turns blue when active
-       (external view) so the user has an at-a-glance state indicator. */
+    /* Black-box / schematic toggle (Phase 8). The toggle row sits in its
+       own visual region: a horizontal separator above it, a darker inactive
+       bg, a thicker border, and a larger label, so it doesn't read as
+       "yet another place button" (R-2). ASCII checkbox glyph instead of
+       U+25A0 ■ because raylib's default font is bitmap and high-Unicode
+       glyphs render as '?' (see Phase 11 OR-gate note). */
     if (st->target) {
         rect_t r = view_btn_rect(self);
+        /* Separator line: spans the sidebar above the toggle row. */
+        float sep_y = r.y - VIEW_BTN_PAD * 0.5f;
+        g->draw_line(g->self,
+                     (vec2_t){self->bounds.x + HPAD,                 sep_y},
+                     (vec2_t){self->bounds.x + self->bounds.w - HPAD, sep_y},
+                     1.0f, COLOR_GRAY);
+
         int external = (st->target->display_mode == DISPLAY_EXTERNAL);
         uint32_t bg = external         ? 0x5082B4FFu
-                    : hits_rect(r, mp) ? 0x64646EFFu
-                                       : 0x50505AFFu;
+                    : hits_rect(r, mp) ? 0x5A5A66FFu
+                                       : 0x40404AFFu;   /* darker than place buttons */
         g->draw_rect      (g->self, r, bg);
-        g->draw_rect_lines(g->self, r, 1, COLOR_LIGHTGRAY);
-        const char *label = external ? "[\xe2\x96\xa0] BLACK-BOX"
-                                     : "[ ] BLACK-BOX";
-        float ltw = g->measure_text(g->self, label, BTN_FONT);
+        g->draw_rect_lines(g->self, r, (float)VIEW_BORDER_THICK,
+                           external ? COLOR_WHITE : COLOR_LIGHTGRAY);
+        const char *label = external ? "[X] BLACK-BOX" : "[ ] BLACK-BOX";
+        float ltw = g->measure_text(g->self, label, VIEW_BTN_FONT);
         g->draw_text(g->self, label,
                      (vec2_t){r.x + (r.w - ltw) * 0.5f,
-                              r.y + (r.h - BTN_FONT) * 0.5f},
-                     BTN_FONT, COLOR_WHITE);
+                              r.y + (r.h - VIEW_BTN_FONT) * 0.5f},
+                     VIEW_BTN_FONT, COLOR_WHITE);
     }
 }
 

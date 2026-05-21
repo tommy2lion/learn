@@ -61,7 +61,7 @@ clarification in R-1 prepares the ground for that.
 
 ---
 
-## R-2 — Sidebar `[ ] BLACK-BOX` button is small / discoverable ⏸
+## R-2 — Sidebar `[ ] BLACK-BOX` button is small / discoverable ✅
 
 **Observation (Phase 8).** The sidebar toggle button works but is
 visually subtle — easy to miss against the dark toolbar background.
