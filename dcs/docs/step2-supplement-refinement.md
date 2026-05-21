@@ -611,7 +611,7 @@ until closed). Menu wiring + `F1` shortcut in
 
 ---
 
-## R-15 — Version system (`version.c` + generated `build_info.c`) ⏸
+## R-15 — Version system (`version.c` + generated `build_info.c`) ✅
 
 **Observation (user).** DCS has no version reporting. The user
 wants a structured version like

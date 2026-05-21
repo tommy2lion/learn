@@ -115,13 +115,12 @@ static void print_usage(FILE *out) {
         "  --input n1=v,n2=v    set multiple inputs at once (one step each)\n");
 }
 
-/* --version output: "DCS <semver>:<YYYYMMDD>:<git-short>". The trailing
-   tamper signature is added in 7c. Downstream parsers should treat
-   colon-delimited fields after the version as forward-compatible
-   metadata. (R-15 parts 1 + 2) */
+/* --version output: "DCS <semver>:<YYYYMMDD>:<git-short>:<sha256>".
+   All four fields are colon-delimited; downstream parsers should treat
+   trailing colon fields as forward-compatible metadata. (R-15 parts 1-3) */
 static void print_version(FILE *out) {
-    fprintf(out, "DCS %s:%s:%s\n",
-            DCS_VERSION_STR, dcs_build_date, dcs_build_commit);
+    fprintf(out, "DCS %s:%s:%s:%s\n",
+            DCS_VERSION_STR, dcs_build_date, dcs_build_commit, dcs_build_sig);
 }
 
 /* --help-format prints a self-contained reference that an AI assistant

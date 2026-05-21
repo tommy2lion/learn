@@ -1,6 +1,8 @@
 #include "dcs_app.h"
 #include "../framework/core/color.h"
 #include "../domain/circuit_io.h"
+#include "../version.h"
+#include "../build_info.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -315,6 +317,14 @@ static void on_view_menu_select(int idx, void *user) {
 static void on_help_menu_select(int idx, void *user) {
     dcs_app_t *app = (dcs_app_t *)user;
     if (idx == 0) help_dialog_show(app->help_dialog);
+    else if (idx == 1) {
+        /* About: show the full version-stamp in the status bar (R-15
+           part 3). A proper modal can come later — this gets the user
+           past "what version am I running?" with zero new widget code. */
+        set_status(app, "DCS %s:%s:%s:%s",
+                   DCS_VERSION_STR, dcs_build_date,
+                   dcs_build_commit, dcs_build_sig);
+    }
 }
 
 /* ── run / sweep ─────────────────────────────────────────────────── */
@@ -549,9 +559,10 @@ static void build_widgets(dcs_app_t *app) {
     menu_add_item(app->view_menu, "Toggle black-box view", "Ctrl+B");
     menu_set_on_select(app->view_menu, on_view_menu_select, app);
 
-    /* Help menu — R-14. Sits to the right of View. */
+    /* Help menu — R-14 + R-15. Sits to the right of View. */
     app->help_menu = menu_create((rect_t){176, 4, 80, 22}, "Help");
     menu_add_item(app->help_menu, "Show keyboard reference", "F1");
+    menu_add_item(app->help_menu, "About DCS",                "");
     menu_set_on_select(app->help_menu, on_help_menu_select, app);
 
     /* Help dialog — full-screen modal layer. Added LAST so it sits on top
