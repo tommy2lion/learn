@@ -459,26 +459,51 @@ static int h_seg_hits_obstacle(float x1, float x2, float y,
    compilers might warn on. */
 #define WG_NO_CHANNEL_Y  (-1.0e30f)
 
-/* Pick the H-channel whose centre y is closest to `prefer_y` and whose
-   x-range fully covers [x_lo, x_hi]. Returns WG_NO_CHANNEL_Y if none
-   fits. (Stage 4B.4) */
-static float find_h_channel_for_stub(float x_lo, float x_hi, float prefer_y,
-                                     const route_context_t *ctx) {
-    if (!ctx || ctx->n_h_channels == 0) return WG_NO_CHANNEL_Y;
-    if (x_hi < x_lo) { float t = x_lo; x_lo = x_hi; x_hi = t; }
-    float best_y    = WG_NO_CHANNEL_Y;
-    float best_dist = 1.0e30f;
-    for (int i = 0; i < ctx->n_h_channels; i++) {
-        const rect_t *ch = &ctx->h_channels[i];
-        /* The channel must straddle the stub's x-range entirely so the
-           detour's H segment fits. Channels span the full canvas width
-           today (see compute_layout_channels), so this is usually true. */
-        if (ch->x > x_lo || ch->x + ch->w < x_hi) continue;
-        float ch_y = ch->y + ch->h * 0.5f;
-        float d    = ch_y > prefer_y ? ch_y - prefer_y : prefer_y - ch_y;
-        if (d < best_dist) { best_dist = d; best_y = ch_y; }
+/* H stub clearance: minimum visible distance an H detour must keep
+   from any obstacle's y edge. 2*GRID gives the eye an obvious gap
+   instead of "wire grazes gate body". */
+#define WG_H_CLEARANCE  (2.0f * ROUTING_GRID)
+
+/* Same as h_seg_hits_obstacle but treats each obstacle as inflated by
+   `margin` on the top and bottom (and `margin` on left/right), so the
+   resulting "clear" y stands well away from the obstacle edge rather
+   than skimming it. */
+static int h_seg_hits_obstacle_padded(float x1, float x2, float y, float margin,
+                                      const route_context_t *ctx) {
+    if (!ctx || ctx->n_obstacles == 0) return 0;
+    if (x2 < x1) { float t = x1; x1 = x2; x2 = t; }
+    for (int i = 0; i < ctx->n_obstacles; i++) {
+        const rect_t *o = &ctx->obstacles[i];
+        if (y <= o->y - margin || y >= o->y + o->h + margin) continue;
+        if (x2 <= o->x - margin || x1 >= o->x + o->w + margin) continue;
+        return 1;
     }
-    return best_y;
+    return 0;
+}
+
+/* Walk outward from prefer_y in grid steps; return the first y where an
+   H segment over [x_lo, x_hi] is clear of every obstacle by at least
+   WG_H_CLEARANCE px. Replaces the earlier precomputed-channel lookup,
+   which failed when the inter-row gap was interrupted by a wider gate
+   (e.g. XOR's centred OR). Capped at ±32 grid steps (≈256 px). Returns
+   WG_NO_CHANNEL_Y if no clear y found within the cap. */
+static float find_clear_y_for_h_stub(float x_lo, float x_hi, float prefer_y,
+                                     const route_context_t *ctx) {
+    /* prefer_y is the consumer pin's y — it's expected to "touch" the
+       destination gate's edge, so check it WITHOUT clearance: an
+       already-clean stub (no crossing) shouldn't be detoured just
+       because the consumer sits next to its own gate. */
+    if (!h_seg_hits_obstacle(x_lo, x_hi, prefer_y, ctx)) return prefer_y;
+    for (int n = 1; n <= 32; n++) {
+        float dy = n * ROUTING_GRID;
+        float yu = prefer_y - dy;
+        if (!h_seg_hits_obstacle_padded(x_lo, x_hi, yu, WG_H_CLEARANCE, ctx))
+            return yu;
+        float yd = prefer_y + dy;
+        if (!h_seg_hits_obstacle_padded(x_lo, x_hi, yd, WG_H_CLEARANCE, ctx))
+            return yd;
+    }
+    return WG_NO_CHANNEL_Y;
 }
 
 /* Snap V_bus_x to the nearest V-channel whose centre falls in the
@@ -763,16 +788,17 @@ int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
 
     /* One stub per consumer from (V_bus_x, c.y) to the pin.
        - Naive case: a single H segment at c.y.
-       - When that H would cross a component body (U-40 caught V columns
-         but not H rows): detour through the nearest H channel via a
-         5-vertex path V -> H -> V. The channels are guaranteed
-         obstacle-free by construction, so the detour's H segment is
-         always clean.
-       - If no channel fits, fall back to the naive H (will visibly
-         cross — at this point the layout itself is too cramped for
-         channelled routing to help; the user can drag manually).
+       - When that H would cross a component body: detour to the
+         nearest y where the stub's x-range is clear, via a 4-segment
+         path V -> H -> V -> H. The final H ensures the wire enters
+         the consumer's pin HORIZONTALLY (input pins on left/right
+         edges of components must not be entered from above/below).
+       - If no clear y is found within the search cap, fall back to
+         the naive H (will visibly cross — at that point the layout
+         itself is too cramped; the user can drag manually).
        Skip zero-length stubs (consumer sits on the V bus).
        (Stage 4B.4, U-41) */
+    const float APPROACH = 2.0f * ROUTING_GRID;
     for (int i = 0; i < eff_n; i++) {
         float cx = consumers[i].x;
         float cy = consumers[i].y;
@@ -781,23 +807,25 @@ int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
         if (h_seg_hits_obstacle(V_bus_x, cx, cy, ctx)) {
             float lo = V_bus_x < cx ? V_bus_x : cx;
             float hi = V_bus_x > cx ? V_bus_x : cx;
-            float ch_y = find_h_channel_for_stub(lo, hi, cy, ctx);
-            if (ch_y != WG_NO_CHANNEL_Y) {
-                wire_segment_t segs[3];
-                /* V from V_bus to channel y */
-                segs[0].a.x = V_bus_x; segs[0].a.y = cy;
-                segs[0].b.x = V_bus_x; segs[0].b.y = ch_y;
-                /* H through channel */
-                segs[1].a.x = V_bus_x; segs[1].a.y = ch_y;
-                segs[1].b.x = cx;      segs[1].b.y = ch_y;
-                /* V from channel back to consumer pin y */
-                segs[2].a.x = cx;      segs[2].a.y = ch_y;
-                segs[2].b.x = cx;      segs[2].b.y = cy;
-                wire_geometry_append_segments(self, net_idx, segs, 3);
+            float clear_y = find_clear_y_for_h_stub(lo, hi, cy, ctx);
+            if (clear_y != WG_NO_CHANNEL_Y && clear_y != cy) {
+                /* approach_x sits APPROACH px short of the pin so the
+                   final segment is a horizontal entry into the pin. */
+                float approach_x = (V_bus_x < cx) ? cx - APPROACH
+                                                  : cx + APPROACH;
+                wire_segment_t segs[4];
+                segs[0].a.x = V_bus_x;    segs[0].a.y = cy;
+                segs[0].b.x = V_bus_x;    segs[0].b.y = clear_y;
+                segs[1].a.x = V_bus_x;    segs[1].a.y = clear_y;
+                segs[1].b.x = approach_x; segs[1].b.y = clear_y;
+                segs[2].a.x = approach_x; segs[2].a.y = clear_y;
+                segs[2].b.x = approach_x; segs[2].b.y = cy;
+                segs[3].a.x = approach_x; segs[3].a.y = cy;
+                segs[3].b.x = cx;         segs[3].b.y = cy;
+                wire_geometry_append_segments(self, net_idx, segs, 4);
                 continue;
             }
-            /* No channel fits the stub's x-range — fall through to
-               naive H (will cross; better than no wire). */
+            /* No clear y found — fall through to naive H. */
         }
 
         wire_segment_t h;
