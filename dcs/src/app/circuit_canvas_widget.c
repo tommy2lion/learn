@@ -16,10 +16,40 @@
 #define DOT_R    3.0f      /* junction-dot radius (supplement Phase 5) */
 #define BUBBLE_R 5.0f      /* NOT-gate output bubble radius (Phase 11) */
 
-#define X_OFFSET 100.0f
-#define X_STEP   180.0f
-#define Y_CENTER 280.0f
-#define Y_STEP   120.0f
+/* ── U-41 layout-constants block ─────────────────────────────────────
+   Every magic number that auto_layout (and the channelled-routing
+   work that follows in Stages 4B.2–4B.5) needs to consult lives
+   here so a single tweak repositions / re-channels everything
+   consistently. Constants are file-scope to keep them out of any
+   public header; auto_layout is the only consumer.
+
+   Naming: LAYOUT_<noun> per CLAUDE.md §4.2 (uppercase is reserved
+   for macros / constants). */
+
+/* Column anchor and step. Inputs sit in column 0; each component
+   depth gets the next column; outputs go in column max_depth + 1. */
+#define LAYOUT_X_OFFSET           100.0f
+#define LAYOUT_X_STEP             180.0f
+
+/* Row geometry. Y_CENTER is the canvas-y at which row 0 sits;
+   subsequent rows step by Y_STEP. The current Y_STEP=120 leaves
+   60px of vertical clearance between adjacent gate bodies
+   (GATE_H = 60), which is plenty of room for an H-channel below. */
+#define LAYOUT_Y_CENTER           280.0f
+#define LAYOUT_Y_STEP             120.0f
+
+/* Stage 4B.2 (column overflow): cap per depth-column. When a depth
+   has more components than this, auto_layout spills them into
+   sub-columns at adjacent x positions. Currently unused — referenced
+   by stage 4B.2's logic. */
+#define LAYOUT_MAX_PER_COL        128
+
+/* Stage 4B.3 (channel reservation): geometry of the horizontal and
+   vertical routing channels reserved between rows and depth columns.
+   Currently unused — referenced by stage 4B.3's channel-rect emitter
+   and stage 4B.4's channel-aware router. */
+#define LAYOUT_H_CHANNEL_HEIGHT    16.0f   /* per row-gap, used by H stubs */
+#define LAYOUT_V_CHANNEL_WIDTH     32.0f   /* per col-gap, used by V buses */
 
 /* ── small helpers ────────────────────────────────────────────────── */
 
@@ -121,8 +151,8 @@ static void auto_layout(circuit_t *c) {
     for (int i = 0; i < c->input_count; i++) {
         int row = col_idx[0]++;
         c->input_positions[i] = (vec2_t){
-            X_OFFSET + 0 * X_STEP,
-            Y_CENTER + (row - (col_total[0] - 1) * 0.5f) * Y_STEP,
+            LAYOUT_X_OFFSET + 0 * LAYOUT_X_STEP,
+            LAYOUT_Y_CENTER + (row - (col_total[0] - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
@@ -131,8 +161,8 @@ static void auto_layout(circuit_t *c) {
         int d = depths[i] >= 1 ? depths[i] : 1;
         int row = col_idx[d]++;
         c->components[i]->position = (vec2_t){
-            X_OFFSET + d * X_STEP,
-            Y_CENTER + (row - (col_total[d] - 1) * 0.5f) * Y_STEP,
+            LAYOUT_X_OFFSET + d * LAYOUT_X_STEP,
+            LAYOUT_Y_CENTER + (row - (col_total[d] - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
@@ -140,8 +170,8 @@ static void auto_layout(circuit_t *c) {
     for (int i = 0; i < c->output_count; i++) {
         int row = col_idx[output_col]++;
         c->output_positions[i] = (vec2_t){
-            X_OFFSET + output_col * X_STEP,
-            Y_CENTER + (row - (col_total[output_col] - 1) * 0.5f) * Y_STEP,
+            LAYOUT_X_OFFSET + output_col * LAYOUT_X_STEP,
+            LAYOUT_Y_CENTER + (row - (col_total[output_col] - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
