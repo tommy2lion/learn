@@ -101,11 +101,16 @@ static int win_set_clipboard(void *self, const char *text) {
 }
 
 static dialog_result_t win_confirm_yes_no_cancel(void *self,
+                                                 void *owner,
                                                  const char *title,
                                                  const char *message) {
     (void)self;
-    int r = MessageBoxA(NULL, message ? message : "", title ? title : "",
-                        MB_YESNOCANCEL | MB_ICONQUESTION | MB_APPLMODAL);
+    /* With a non-NULL owner the dialog centres on it and is window-modal;
+       NULL falls back to screen-centred + application-modal. */
+    UINT flags = MB_YESNOCANCEL | MB_ICONQUESTION;
+    flags |= owner ? MB_TASKMODAL : MB_APPLMODAL;
+    int r = MessageBoxA((HWND)owner,
+                        message ? message : "", title ? title : "", flags);
     switch (r) {
         case IDYES:    return DLG_YES;
         case IDNO:     return DLG_NO;

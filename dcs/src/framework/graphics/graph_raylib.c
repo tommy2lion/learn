@@ -109,6 +109,11 @@ static void rl_set_window_title(void *self, const char *title) {
     if (title) SetWindowTitle(title);
 }
 
+static void *rl_get_native_window_handle(void *self) {
+    (void)self;
+    return GetWindowHandle();
+}
+
 /* ── drawing primitives ───────────────────────────────────────────── */
 
 static void rl_draw_rect(void *self, rect_t r, uint32_t color) {
@@ -232,8 +237,9 @@ static igraph_t g_graph = {
     .should_close      = rl_should_close,
     .begin_frame       = rl_begin_frame,
     .end_frame         = rl_end_frame,
-    .screen_size       = rl_screen_size,
-    .set_window_title  = rl_set_window_title,
+    .screen_size              = rl_screen_size,
+    .set_window_title         = rl_set_window_title,
+    .get_native_window_handle = rl_get_native_window_handle,
 
     .draw_rect         = rl_draw_rect,
     .draw_rect_lines   = rl_draw_rect_lines,

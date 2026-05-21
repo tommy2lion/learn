@@ -26,12 +26,16 @@ interface tagt_iplatform {
     int   (*open_file)  (void *self, const char *title, char *out, int max);
     int   (*save_file)  (void *self, const char *title, char *out, int max);
 
-    /* Show a modal 3-button confirmation dialog. The exact button labels
-       are platform-defined (Windows: Yes / No / Cancel); phrase the
-       message so those map naturally to the intended choices (e.g.
-       "Save changes before closing?" → Yes saves, No discards,
-       Cancel aborts). Returns one of dialog_result_t. (R-11) */
+    /* Show a modal 3-button confirmation dialog. `owner` is the native
+       OS window handle (typically from igraph_t::get_native_window_handle)
+       used to centre the dialog on the program's window and make it
+       window-modal; NULL falls back to screen-centred + application-modal.
+       Button labels are platform-defined (Windows: Yes / No / Cancel);
+       phrase the message so those map naturally (e.g. "Save changes
+       before closing?" → Yes saves, No discards, Cancel aborts).
+       Returns one of dialog_result_t. (R-11) */
     dialog_result_t (*confirm_yes_no_cancel)(void *self,
+                                             void *owner,
                                              const char *title,
                                              const char *message);
 

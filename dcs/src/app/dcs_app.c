@@ -265,8 +265,13 @@ static int on_attempt_quit(void *user) {
     char msg[256];
     snprintf(msg, sizeof(msg),
              "Save changes to %s before closing?", base);
+    /* Centre the dialog on our window. NULL fallback if the backend
+       doesn't expose a native handle (Windows then screen-centres). */
+    void *owner = app->graph && app->graph->get_native_window_handle
+        ? app->graph->get_native_window_handle(app->graph->self)
+        : NULL;
     dialog_result_t r = app->platform->confirm_yes_no_cancel(
-        app->platform->self, "Unsaved changes", msg);
+        app->platform->self, owner, "Unsaved changes", msg);
     if (r == DLG_YES) {
         action_save(app);
         return app->dirty ? 0 : 1;   /* save failure / save-as cancel → veto */

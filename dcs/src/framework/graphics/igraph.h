@@ -49,6 +49,12 @@ interface tagt_igraph {
     void  (*end_frame)        (void *self);
     void  (*screen_size)      (void *self, int *w, int *h);
     void  (*set_window_title) (void *self, const char *title);
+    /* Native OS window handle (Windows: HWND, X11: Window, etc.) cast
+       to void*. Returns NULL when no window exists or the backend
+       doesn't expose one. iplatform's dialog callers use this as the
+       owner so the dialog centres on this window instead of the screen
+       and stays modal to it. (R-11 follow-up) */
+    void *(*get_native_window_handle)(void *self);
 
     /* drawing — colors are 0xRRGGBBAA (see core/color.h) */
     void  (*draw_rect)         (void *self, rect_t r, uint32_t color);

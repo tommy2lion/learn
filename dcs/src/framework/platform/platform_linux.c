@@ -65,9 +65,10 @@ static int lnx_get_clipboard(void *self, char *out, int max) {
 }
 
 static dialog_result_t lnx_confirm_yes_no_cancel(void *self,
+                                                 void *owner,
                                                  const char *title,
                                                  const char *message) {
-    (void)self; (void)title; (void)message;
+    (void)self; (void)owner; (void)title; (void)message;
     /* Zenity wrapper would go here for the real Linux build; the
        Phase-2.1 stub returns DLG_ERROR so the caller's fallback path
        runs (treats "no dialog" as "abort the gesture safely"). */
