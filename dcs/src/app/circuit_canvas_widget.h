@@ -122,6 +122,12 @@ void circuit_canvas_widget_reset(circuit_canvas_widget_t *self);
    reach it without the canvas needing focus. Idempotent. (R-12) */
 void circuit_canvas_widget_select_all(circuit_canvas_widget_t *self);
 
+/* Delete every node in the current selection (no-op if selection is empty).
+   Public so dcs_app's global Del shortcut can reach it without the canvas
+   needing focus — the framework's focused-widget key-event path is currently
+   unused. (R-13) */
+void circuit_canvas_widget_delete_selection(circuit_canvas_widget_t *self);
+
 /* Drop all wire geometry and re-route from the current circuit's connectivity.
    Called internally by the canvas's mutation paths; exposed for testing and
    for any future caller that has mutated the underlying circuit_t outside

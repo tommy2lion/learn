@@ -1271,7 +1271,7 @@ int main(void) {
         check("select_all(NULL) is safe", 1);
     }
 
-    /* ── R-13: synthetic Delete key event removes the selection ──── */
+    /* ── R-13: delete_selection removes every selected node ──────── */
     {
         circuit_t *c = make_simple_circuit();
         circuit_canvas_widget_t *cw =
@@ -1280,17 +1280,33 @@ int main(void) {
         int before = c->input_count + c->component_count + c->output_count;
         check("R-13 setup: 4 nodes pre-delete", before == 4);
 
-        event_t del;
-        memset(&del, 0, sizeof(del));
-        del.kind    = EV_KEY_PRESS;
-        del.key.key = IK_DELETE;
-        widget_handle_event(&cw->base, &del);
+        circuit_canvas_widget_delete_selection(cw);
 
         int after = c->input_count + c->component_count + c->output_count;
-        check("Del key: removes every selected node",   after == 0);
-        check("Del key: clears selection_count after",  cw->selection_count == 0);
+        check("delete_selection: removes every selected node",  after == 0);
+        check("delete_selection: clears selection_count after", cw->selection_count == 0);
         widget_destroy(&cw->base);
         circuit_destroy(c);
+    }
+
+    /* ── R-13: delete_selection on empty selection is a no-op ────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        int before = c->input_count + c->component_count + c->output_count;
+        circuit_canvas_widget_delete_selection(cw);   /* nothing selected */
+        int after = c->input_count + c->component_count + c->output_count;
+        check("delete_selection: empty selection leaves nodes intact",
+              before == after);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-13: delete_selection on NULL widget is a no-op ────────── */
+    {
+        circuit_canvas_widget_delete_selection(NULL);
+        check("delete_selection(NULL) is safe", 1);
     }
 
     printf("\n%d / %d passed\n", total - failures, total);

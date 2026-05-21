@@ -289,6 +289,11 @@ static void poll_global_shortcuts(dcs_app_t *app) {
        path so it fires regardless of which widget owns focus. */
     if (ctrl && g->key_pressed(g->self, IK_A))
         circuit_canvas_widget_select_all(app->circuit_canvas);
+    /* Del deletes the current canvas selection (R-13). Global for the same
+       reason as Ctrl+A — frame.c key-dispatch needs a focused widget and
+       focus_manager_set is never called by any widget today. */
+    if (!ctrl && g->key_pressed(g->self, IK_DELETE))
+        circuit_canvas_widget_delete_selection(app->circuit_canvas);
     /* Keyboard zoom — Ctrl+= (the '+' key without Shift) zooms in,
        Ctrl+- zooms out. Mirrors the mouse-wheel zoom but focuses on
        the current cam_offset (typically the canvas centre). */

@@ -1243,9 +1243,10 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
         return 1;
     }
 
-    /* keys: ESC cancels current mode + clears selection; Delete removes
-       selection. (Ctrl+A select-all is handled globally by dcs_app's
-       poll_global_shortcuts so it works regardless of focus — R-12.) */
+    /* keys: ESC cancels current mode + clears selection. (Del delete-selection
+       and Ctrl+A select-all are handled globally by dcs_app's
+       poll_global_shortcuts because the framework's focused-widget key-event
+       dispatch is currently unused — see R-12 / R-13.) */
     if (ev->kind == EV_KEY_PRESS) {
         if (ev->key.key == IK_ESCAPE) {
             cw->mode = CMODE_IDLE;
@@ -1253,12 +1254,6 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             cw->wire_src = NODE_REF_NONE;
             cw->drag_node = NODE_REF_NONE;
             selection_clear(cw);
-            return 1;
-        }
-        if (ev->key.key == IK_DELETE && selection_count(cw) > 0) {
-            int n = selection_count(cw);
-            remove_selection(cw);
-            status(cw, "Deleted %d node%s", n, n == 1 ? "" : "s");
             return 1;
         }
     }
@@ -1547,6 +1542,14 @@ void circuit_canvas_widget_select_all(circuit_canvas_widget_t *self) {
         selection_add(self, (node_ref_t){NODE_OUTPUT, i});
     status(self, "Selected %d node%s",
            self->selection_count, self->selection_count == 1 ? "" : "s");
+}
+
+void circuit_canvas_widget_delete_selection(circuit_canvas_widget_t *self) {
+    if (!self || !self->circuit) return;
+    int n = selection_count(self);
+    if (n <= 0) return;
+    remove_selection(self);
+    status(self, "Deleted %d node%s", n, n == 1 ? "" : "s");
 }
 
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
