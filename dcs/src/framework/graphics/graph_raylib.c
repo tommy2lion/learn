@@ -78,6 +78,11 @@ static int rl_init(void *self, int w, int h, const char *title) {
     (void)self;
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(w, h, title);
+    /* Disable raylib's built-in ESC=quit. The framework's quit policy is
+       set by callers via frame_quit()->esc_quits (default: off), and the
+       canvas widget binds ESC to cancel-mode through poll_global_shortcuts
+       — so leaving raylib's default in place would short-circuit both. */
+    SetExitKey(KEY_NULL);
     SetTargetFPS(60);
     return IsWindowReady() ? 0 : -1;
 }
