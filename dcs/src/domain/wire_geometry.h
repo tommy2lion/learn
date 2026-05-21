@@ -138,6 +138,17 @@ int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
 int wire_geometry_shift_v_bus(wire_geometry_t *self, int net_idx,
                               float column_x, float delta);
 
+/* Optional context for obstacle-aware routing (U-40, Stage 4).
+   When the V column of a Z-route or a Steiner V-bus would cross a
+   component body, the router shifts the column to avoid the obstacle.
+   The struct grows with U-41 (channelled layout) to also carry the
+   reserved routing-channel rects. */
+typedef struct tagt_route_context {
+    const rect_t *obstacles;     /* component bboxes; pin edges count as touching, not crossing */
+    int           n_obstacles;
+    /* future: channels for U-41 */
+} route_context_t;
+
 /* Compute an orthogonal route from producer_pin to consumer_pin and append
    the resulting segments to the net identified by wire_name. Three cases:
      - producer_pin.y == consumer_pin.y  → one horizontal segment.
@@ -152,6 +163,15 @@ int wire_geometry_shift_v_bus(wire_geometry_t *self, int net_idx,
    Returns 0 on success, -1 on invalid wire_name or allocation failure. */
 int auto_route_wire(wire_geometry_t *self, const char *wire_name,
                     vec2_t producer_pin, vec2_t consumer_pin);
+
+/* Obstacle-aware variant. With ctx == NULL behaves identically to
+   auto_route_wire above. With ctx != NULL and obstacles populated, the
+   V column of the Z-route is shifted until it doesn't intersect any
+   component bbox whose y-range overlaps [producer.y, consumer.y].
+   (U-40, Stage 4) */
+int auto_route_wire_ctx(wire_geometry_t *self, const char *wire_name,
+                        vec2_t producer_pin, vec2_t consumer_pin,
+                        const route_context_t *ctx);
 
 /* Route a whole net at once using a Steiner-trunk topology:
    - For n == 0 the net is removed.
@@ -169,5 +189,13 @@ int auto_route_wire(wire_geometry_t *self, const char *wire_name,
 int auto_route_net(wire_geometry_t *self, const char *wire_name,
                    vec2_t producer_pin,
                    const vec2_t *consumers, int n);
+
+/* Obstacle-aware variant of auto_route_net. ctx == NULL is identical to
+   auto_route_net. ctx != NULL shifts the V-bus column to avoid component
+   bodies (U-40). */
+int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
+                       vec2_t producer_pin,
+                       const vec2_t *consumers, int n,
+                       const route_context_t *ctx);
 
 #endif /* DCS_APP_WIRE_GEOMETRY_H */

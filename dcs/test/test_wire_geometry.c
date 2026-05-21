@@ -1285,6 +1285,96 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ─── U-40 (Stage 4): obstacle-aware routing ──────────────── */
+
+    /* Z-route mid_x shifts away from a blocking gate body. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Producer at (0, 0), consumer at (200, 100). Naive Z would
+           place mid_x ≈ 96 (snapped). Put a 50-wide gate centred at
+           x=96 covering y=0..100 — the naive V-column would cross it. */
+        rect_t obs = { 80, 0, 50, 100 };   /* x=80..130 */
+        route_context_t ctx = { .obstacles = &obs, .n_obstacles = 1 };
+
+        auto_route_wire_ctx(&g, "w", (vec2_t){0, 0}, (vec2_t){200, 100}, &ctx);
+        int idx = wire_geometry_find(&g, "w");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("Z-route w/ obstacle: 3 segments emitted", n->seg_count == 3);
+        /* The V segment is segs[1]. Its x must be outside [80, 130]. */
+        float vx = n->segs[1].a.x;
+        check("Z-route w/ obstacle: V column avoids obstacle",
+              vx <= obs.x || vx >= obs.x + obs.w);
+        wire_geometry_release(&g);
+    }
+
+    /* ctx == NULL → original behaviour (already covered by the 200 prior
+       tests, but spell it out explicitly). */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        auto_route_wire_ctx(&g, "w", (vec2_t){0, 0}, (vec2_t){200, 100}, NULL);
+        auto_route_wire    (&g, "x", (vec2_t){0, 0}, (vec2_t){200, 100});
+        const wire_net_geom_t *na = wire_geometry_net(&g, wire_geometry_find(&g, "w"));
+        const wire_net_geom_t *nb = wire_geometry_net(&g, wire_geometry_find(&g, "x"));
+        check("ctx=NULL identical to wrapper: same seg count",
+              na->seg_count == nb->seg_count);
+        check("ctx=NULL identical to wrapper: same V x",
+              na->segs[1].a.x == nb->segs[1].a.x);
+        wire_geometry_release(&g);
+    }
+
+    /* Empty obstacle list behaves like ctx=NULL. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        route_context_t empty = { .obstacles = NULL, .n_obstacles = 0 };
+        auto_route_wire_ctx(&g, "w", (vec2_t){0, 0}, (vec2_t){200, 100}, &empty);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "w"));
+        check("empty obstacle list: produces normal Z-route",
+              n->seg_count == 3);
+        wire_geometry_release(&g);
+    }
+
+    /* Steiner V-bus shifts away from obstacle column. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Producer at (0, 50). Two consumers at (200, 0) and (200, 100).
+           Naive V-bus x ≈ 96 (snap-mid of 0..200). Obstacle covering
+           x=80..130 in the bus's y-range forces a shift. */
+        rect_t obs = { 80, 0, 50, 100 };
+        route_context_t ctx = { .obstacles = &obs, .n_obstacles = 1 };
+        vec2_t consumers[2] = { {200, 0}, {200, 100} };
+
+        auto_route_net_ctx(&g, "fan", (vec2_t){0, 50}, consumers, 2, &ctx);
+        int idx = wire_geometry_find(&g, "fan");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("Steiner net w/ obstacle: emitted segments",
+              n->seg_count > 0);
+        /* Find any V segment and confirm its x is outside the obstacle. */
+        int v_segs_clean = 1;
+        for (int i = 0; i < n->seg_count; i++) {
+            const wire_segment_t *s = &n->segs[i];
+            if (s->a.x != s->b.x) continue;   /* not vertical */
+            float x = s->a.x;
+            if (x > obs.x && x < obs.x + obs.w) { v_segs_clean = 0; break; }
+        }
+        check("Steiner V-bus avoids obstacle column", v_segs_clean);
+        wire_geometry_release(&g);
+    }
+
+    /* Obstacle outside the route's y-range doesn't trigger a shift. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Producer at (0, 0), consumer at (200, 100). Obstacle far below. */
+        rect_t obs = { 80, 500, 50, 50 };
+        route_context_t ctx = { .obstacles = &obs, .n_obstacles = 1 };
+        auto_route_wire_ctx(&g, "w", (vec2_t){0, 0}, (vec2_t){200, 100}, &ctx);
+        const wire_net_geom_t *n = wire_geometry_net(&g, wire_geometry_find(&g, "w"));
+        /* Naive Z mid_x = snap_to_grid(100) = 104 (round-half-up to next
+           grid step). The obstacle-aware shift MUST be a no-op here. */
+        check("obstacle outside y-range: V at naive 104",
+              n->segs[1].a.x == 104.0f);
+        wire_geometry_release(&g);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

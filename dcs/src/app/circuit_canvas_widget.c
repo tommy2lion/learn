@@ -402,28 +402,51 @@ static int collect_consumer_pins(const circuit_t *c, const char *wire_name,
     return n;
 }
 
+/* Build the obstacle list (U-40) — every component's bounding box.
+   The router's v_column_hits_obstacle uses strict inequality so a wire
+   endpoint AT the gate edge (i.e. on a pin) is NOT considered crossing,
+   so we can include every gate including the producer's own. Caller
+   stack-allocates the array sized DOMAIN_MAX_IO * 2 or
+   c->component_count — whichever is large enough. */
+static int build_component_obstacles(const circuit_t *c, rect_t *out, int max) {
+    int n = 0;
+    for (int i = 0; i < c->component_count && n < max; i++) {
+        vec2_t p = c->components[i]->position;
+        out[n++] = (rect_t){ p.x - GATE_W / 2, p.y - GATE_H / 2, GATE_W, GATE_H };
+    }
+    return n;
+}
+
+#define MAX_OBSTACLES 512   /* matches typical circuit_t component cap range */
+
 static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
     wire_geometry_release(&cw->wires);
     wire_geometry_init   (&cw->wires);
     circuit_t *c = cw->circuit;
     if (!c) return;
 
+    /* U-40: build the obstacle list once and reuse for every net's
+       routing call. (Cheap — just stack-allocated rects.) */
+    rect_t obs[MAX_OBSTACLES];
+    int n_obs = build_component_obstacles(c, obs, MAX_OBSTACLES);
+    route_context_t ctx = { .obstacles = obs, .n_obstacles = n_obs };
+
     /* Producer-wire iteration: each input contributes its name; each
        component contributes its output-wire name. For each, gather every
-       consumer pin and emit one Steiner-routed net. (Phase 13) */
+       consumer pin and emit one Steiner-routed net. (Phase 13 + U-40) */
     for (int i = 0; i < c->input_count; i++) {
         const char *wn = c->input_names[i];
         vec2_t producer = node_output_pin(c, (node_ref_t){NODE_INPUT, i});
         vec2_t consumers[MAX_CCW_FANOUT];
         int n = collect_consumer_pins(c, wn, consumers, MAX_CCW_FANOUT);
-        if (n > 0) auto_route_net(&cw->wires, wn, producer, consumers, n);
+        if (n > 0) auto_route_net_ctx(&cw->wires, wn, producer, consumers, n, &ctx);
     }
     for (int i = 0; i < c->component_count; i++) {
         const char *wn = c->components[i]->name;
         vec2_t producer = node_output_pin(c, (node_ref_t){NODE_COMPONENT, i});
         vec2_t consumers[MAX_CCW_FANOUT];
         int n = collect_consumer_pins(c, wn, consumers, MAX_CCW_FANOUT);
-        if (n > 0) auto_route_net(&cw->wires, wn, producer, consumers, n);
+        if (n > 0) auto_route_net_ctx(&cw->wires, wn, producer, consumers, n, &ctx);
     }
 }
 
@@ -443,7 +466,13 @@ static void reseat_wire_geometry(circuit_canvas_widget_t *cw, const char *wire_n
 
     vec2_t consumers[MAX_CCW_FANOUT];
     int n = collect_consumer_pins(c, wire_name, consumers, MAX_CCW_FANOUT);
-    if (n > 0) auto_route_net(&cw->wires, wire_name, producer, consumers, n);
+
+    /* U-40: feed the obstacle list so single-net reseats avoid bodies
+       just like the bulk seed_geometry path does. */
+    rect_t obs[MAX_OBSTACLES];
+    int n_obs = build_component_obstacles(c, obs, MAX_OBSTACLES);
+    route_context_t ctx = { .obstacles = obs, .n_obstacles = n_obs };
+    if (n > 0) auto_route_net_ctx(&cw->wires, wire_name, producer, consumers, n, &ctx);
 }
 
 #ifndef NDEBUG

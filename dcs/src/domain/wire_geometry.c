@@ -421,8 +421,55 @@ void wire_geometry_move(wire_geometry_t *dst, wire_geometry_t *src) {
     src->net_cap   = 0;
 }
 
+/* True if the vertical column at x (covering y-range [y_lo, y_hi]) lands
+   STRICTLY inside any obstacle whose own y-range overlaps it. Endpoints
+   on obstacle edges are NOT considered hits — pins typically sit on
+   gate edges. (U-40, Stage 4) */
+static int v_column_hits_obstacle(float x, float y_lo, float y_hi,
+                                  const route_context_t *ctx) {
+    if (!ctx || ctx->n_obstacles == 0) return 0;
+    if (y_hi < y_lo) { float t = y_lo; y_lo = y_hi; y_hi = t; }
+    for (int i = 0; i < ctx->n_obstacles; i++) {
+        const rect_t *o = &ctx->obstacles[i];
+        if (x <= o->x || x >= o->x + o->w) continue;        /* outside column */
+        if (y_hi <= o->y || y_lo >= o->y + o->h) continue;  /* y ranges disjoint */
+        return 1;
+    }
+    return 0;
+}
+
+/* Find a V-column x that doesn't hit any obstacle, starting from the
+   naive midpoint and walking outward in grid-step increments. Caps the
+   search to avoid runaway; on cap reached, returns the original mid_x
+   (router silently emits a known-bad route — better than no wire). */
+static float shift_mid_x_away_from_obstacles(
+    float naive_mid_x, float prod_x, float cons_x,
+    float y_lo, float y_hi, const route_context_t *ctx) {
+    if (!v_column_hits_obstacle(naive_mid_x, y_lo, y_hi, ctx)) return naive_mid_x;
+    /* Try walking left toward producer, then right toward consumer.
+       16 attempts ≈ ±128 px which covers any reasonable gate width. */
+    for (int step = 1; step <= 16; step++) {
+        float dx = step * ROUTING_GRID;
+        float lx = naive_mid_x - dx;
+        if (lx != prod_x && lx != cons_x
+            && !v_column_hits_obstacle(lx, y_lo, y_hi, ctx))
+            return lx;
+        float rx = naive_mid_x + dx;
+        if (rx != prod_x && rx != cons_x
+            && !v_column_hits_obstacle(rx, y_lo, y_hi, ctx))
+            return rx;
+    }
+    return naive_mid_x;
+}
+
 int auto_route_wire(wire_geometry_t *self, const char *wire_name,
                     vec2_t producer_pin, vec2_t consumer_pin) {
+    return auto_route_wire_ctx(self, wire_name, producer_pin, consumer_pin, NULL);
+}
+
+int auto_route_wire_ctx(wire_geometry_t *self, const char *wire_name,
+                        vec2_t producer_pin, vec2_t consumer_pin,
+                        const route_context_t *ctx) {
     int idx = wire_geometry_get_or_create(self, wire_name);
     if (idx < 0) return -1;
 
@@ -454,6 +501,11 @@ int auto_route_wire(wire_geometry_t *self, const char *wire_name,
         float dir = (consumer_pin.x > producer_pin.x) ? ROUTING_GRID : -ROUTING_GRID;
         if (mid_x == producer_pin.x) mid_x += dir;
         if (mid_x == consumer_pin.x) mid_x -= dir;
+
+        /* U-40: avoid component bodies if a route context is supplied. */
+        mid_x = shift_mid_x_away_from_obstacles(
+            mid_x, producer_pin.x, consumer_pin.x,
+            producer_pin.y, consumer_pin.y, ctx);
 
         vec2_t corner_top, corner_bot;
         corner_top.x = mid_x; corner_top.y = producer_pin.y;
@@ -491,6 +543,12 @@ static int insert_sorted_unique(float *xs, int *n, float v) {
 
 int auto_route_net(wire_geometry_t *self, const char *wire_name,
                    vec2_t producer, const vec2_t *consumers, int n) {
+    return auto_route_net_ctx(self, wire_name, producer, consumers, n, NULL);
+}
+
+int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
+                       vec2_t producer, const vec2_t *consumers, int n,
+                       const route_context_t *ctx) {
     if (!self || !wire_name || !wire_name[0]) return -1;
     if (n > 0 && !consumers) return -1;
 
@@ -502,8 +560,9 @@ int auto_route_net(wire_geometry_t *self, const char *wire_name,
         return 0;
     }
     if (n == 1) {
-        /* Single consumer: fall back to the Z-router. */
-        return auto_route_wire(self, wire_name, producer, consumers[0]);
+        /* Single consumer: fall back to the Z-router (with the same ctx
+           so obstacle avoidance applies). */
+        return auto_route_wire_ctx(self, wire_name, producer, consumers[0], ctx);
     }
 
     int net_idx = wire_geometry_get_or_create(self, wire_name);
@@ -591,6 +650,17 @@ int auto_route_net(wire_geometry_t *self, const char *wire_name,
         if (!collide) break;
         /* Shift leftward (toward producer side); stop if we'd cross the
            producer's x or go too far away. */
+        float next = V_bus_x - MIN_VBUS_SPACING;
+        if ((dir > 0 && next <= producer.x) ||
+            (dir < 0 && next >= producer.x)) break;
+        V_bus_x = next;
+    }
+
+    /* U-40 obstacle avoidance: same shift pattern, but checking against
+       component bbox columns instead of other nets' V segments. Runs
+       AFTER the R-8 net-vs-net shift so the two layers compose. */
+    for (int attempt = 0; attempt < 16; attempt++) {
+        if (!v_column_hits_obstacle(V_bus_x, net_y_lo, net_y_hi, ctx)) break;
         float next = V_bus_x - MIN_VBUS_SPACING;
         if ((dir > 0 && next <= producer.x) ||
             (dir < 0 && next >= producer.x)) break;
