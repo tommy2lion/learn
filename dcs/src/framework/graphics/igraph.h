@@ -13,7 +13,8 @@
 
 typedef enum {
     IK_NONE = 0,
-    IK_A, IK_B, IK_S, IK_N, IK_O, IK_R, IK_F,   /* alphabetic keys we use   */
+    IK_A, IK_B, IK_S, IK_N, IK_O, IK_R, IK_F,
+    IK_Y, IK_Z,                                  /* undo/redo shortcuts (R-5) */
     IK_EQUAL, IK_MINUS,                          /* zoom shortcuts (Ctrl+=, Ctrl+-) */
     IK_ESCAPE, IK_DELETE, IK_TAB, IK_ENTER,
     IK_LEFT_CTRL, IK_RIGHT_CTRL,

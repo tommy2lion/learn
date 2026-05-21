@@ -468,6 +468,12 @@ static void on_view_menu_select(int idx, void *user) {
     if (idx == 0) action_toggle_display_mode(app);
 }
 
+static void on_edit_menu_select(int idx, void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    if (idx == 0)      dcs_app_undo(app);
+    else if (idx == 1) dcs_app_redo(app);
+}
+
 static void on_help_menu_select(int idx, void *user) {
     dcs_app_t *app = (dcs_app_t *)user;
     if (idx == 0) help_dialog_show(app->help_dialog);
@@ -549,6 +555,13 @@ static void poll_global_shortcuts(dcs_app_t *app) {
        path so it fires regardless of which widget owns focus. */
     if (ctrl && g->key_pressed(g->self, IK_A))
         circuit_canvas_widget_select_all(app->circuit_canvas);
+    /* Undo / Redo (R-5). Ctrl+Z = undo; Ctrl+Y = redo; Ctrl+Shift+Z is
+       the muscle-memory alternate redo (common in editors). */
+    if (ctrl && g->key_pressed(g->self, IK_Z)) {
+        if (shift) dcs_app_redo(app);
+        else       dcs_app_undo(app);
+    }
+    if (ctrl && g->key_pressed(g->self, IK_Y)) dcs_app_redo(app);
     /* Del deletes the current canvas selection (R-13). Global for the same
        reason as Ctrl+A — frame.c key-dispatch needs a focused widget and
        focus_manager_set is never called by any widget today. */
@@ -708,13 +721,19 @@ static void build_widgets(dcs_app_t *app) {
     menu_add_item(app->file_menu, "Save As...", "Ctrl+Shift+S");
     menu_set_on_select(app->file_menu, on_menu_select, app);
 
-    /* View menu — Phase 8 black-box toggle. Sits to the right of File. */
-    app->view_menu = menu_create((rect_t){92, 4, 80, 22}, "View");
+    /* Edit menu — R-5 undo/redo. Sits between File and View. */
+    app->edit_menu = menu_create((rect_t){92, 4, 80, 22}, "Edit");
+    menu_add_item(app->edit_menu, "Undo", "Ctrl+Z");
+    menu_add_item(app->edit_menu, "Redo", "Ctrl+Y");
+    menu_set_on_select(app->edit_menu, on_edit_menu_select, app);
+
+    /* View menu — Phase 8 black-box toggle. */
+    app->view_menu = menu_create((rect_t){176, 4, 80, 22}, "View");
     menu_add_item(app->view_menu, "Toggle black-box view", "Ctrl+B");
     menu_set_on_select(app->view_menu, on_view_menu_select, app);
 
-    /* Help menu — R-14 + R-15. Sits to the right of View. */
-    app->help_menu = menu_create((rect_t){176, 4, 80, 22}, "Help");
+    /* Help menu — R-14 + R-15. */
+    app->help_menu = menu_create((rect_t){260, 4, 80, 22}, "Help");
     menu_add_item(app->help_menu, "Show keyboard reference", "F1");
     menu_add_item(app->help_menu, "About DCS",                "");
     menu_set_on_select(app->help_menu, on_help_menu_select, app);
@@ -744,6 +763,7 @@ static void build_widgets(dcs_app_t *app) {
     panel_add_child(app->root, &app->div_v->base);
     panel_add_child(app->root, &app->status_label->base);
     panel_add_child(app->root, &app->file_menu->base);
+    panel_add_child(app->root, &app->edit_menu->base);
     panel_add_child(app->root, &app->view_menu->base);
     panel_add_child(app->root, &app->help_menu->base);
     /* Modal layer LAST so it's the topmost child (depth-first dispatch

@@ -102,7 +102,7 @@ work needed before then — the file's stub status is clearly flagged.
 
 ---
 
-## R-5 — Editing undo / redo (`Ctrl+Z` / `Ctrl+Y`) ⏸
+## R-5 — Editing undo / redo (`Ctrl+Z` / `Ctrl+Y`) ✅
 
 **Observation (clarified during Phase-12 review).** The codebase has no
 user-facing undo. The only way to revert an edit is to reload the last

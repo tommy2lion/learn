@@ -37,6 +37,7 @@ class tagt_dcs_app {
     timing_canvas_widget_t  *timing_canvas;
     input_panel_t           *input_panel;
     menu_t                  *file_menu;
+    menu_t                  *edit_menu;     /* R-5 — Undo / Redo                */
     menu_t                  *view_menu;     /* Phase 8 — black-box toggle, etc. */
     menu_t                  *help_menu;     /* R-14 — Show help (F1)            */
     help_dialog_t           *help_dialog;   /* R-14 — modal keyboard reference   */

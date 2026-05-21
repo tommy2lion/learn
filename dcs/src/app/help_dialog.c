@@ -26,10 +26,12 @@ static const help_entry_t SEC_VIEW[] = {
     {"F",      "Fit view"},
 };
 static const help_entry_t SEC_EDIT[] = {
-    {"Ctrl+A", "Select all nodes"},
-    {"Del",    "Delete selection"},
-    {"Arrows", "Nudge selection by 1 px"},
-    {"ESC",    "Cancel current mode / clear selection"},
+    {"Ctrl+A",       "Select all nodes"},
+    {"Del",          "Delete selection"},
+    {"Arrows",       "Nudge selection by 1 px"},
+    {"Ctrl+Z",       "Undo"},
+    {"Ctrl+Y",       "Redo (also Ctrl+Shift+Z)"},
+    {"ESC",          "Cancel current mode / clear selection"},
 };
 static const help_entry_t SEC_SIM[] = {
     {"R",       "Run one step"},
