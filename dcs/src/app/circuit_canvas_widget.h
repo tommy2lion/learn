@@ -28,6 +28,13 @@ typedef enum {
 
 typedef void (*ccw_status_fn_t)(const char *msg, void *user);
 
+/* Fires after every user-driven mutation of the underlying circuit or wire
+   geometry (place, connect, disconnect, delete, drag-end, wire-edit release,
+   nudge). NOT fired for selection-only changes, hover, click-to-highlight,
+   nor for set_circuit / load_geometry (which reset state from a file).
+   dcs_app uses this to drive the unsaved-changes flag. (R-10) */
+typedef void (*ccw_mutated_fn_t)(void *user);
+
 class tagt_circuit_canvas_widget {
     widget_t        base;            /* must be first */
     circuit_t      *circuit;         /* not owned; outlives the widget */
@@ -66,6 +73,10 @@ class tagt_circuit_canvas_widget {
     ccw_status_fn_t on_status;
     void           *status_user;
 
+    /* mutation hook (set by dcs_app for dirty-flag tracking — R-10) */
+    ccw_mutated_fn_t on_mutated;
+    void            *mutated_user;
+
     /* visual constants (filled in create) */
     float gate_w, gate_h, io_r;
 
@@ -101,6 +112,8 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
 void circuit_canvas_widget_set_circuit (circuit_canvas_widget_t *self, circuit_t *c);
 void circuit_canvas_widget_set_status_cb(circuit_canvas_widget_t *self,
                                          ccw_status_fn_t cb, void *user);
+void circuit_canvas_widget_set_mutated_cb(circuit_canvas_widget_t *self,
+                                          ccw_mutated_fn_t cb, void *user);
 void circuit_canvas_widget_fit_view    (circuit_canvas_widget_t *self);
 
 /* Keyboard-zoom helpers — bound to Ctrl+= and Ctrl+- in dcs_app. Multiply

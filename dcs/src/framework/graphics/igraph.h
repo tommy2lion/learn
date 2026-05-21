@@ -42,12 +42,13 @@ interface tagt_igraph {
     void *self;
 
     /* lifecycle */
-    int   (*init)         (void *self, int w, int h, const char *title);
-    void  (*shutdown)     (void *self);
-    int   (*should_close) (void *self);
-    void  (*begin_frame)  (void *self);
-    void  (*end_frame)    (void *self);
-    void  (*screen_size)  (void *self, int *w, int *h);
+    int   (*init)             (void *self, int w, int h, const char *title);
+    void  (*shutdown)         (void *self);
+    int   (*should_close)     (void *self);
+    void  (*begin_frame)      (void *self);
+    void  (*end_frame)        (void *self);
+    void  (*screen_size)      (void *self, int *w, int *h);
+    void  (*set_window_title) (void *self, const char *title);
 
     /* drawing — colors are 0xRRGGBBAA (see core/color.h) */
     void  (*draw_rect)         (void *self, rect_t r, uint32_t color);

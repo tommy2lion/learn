@@ -457,7 +457,7 @@ flip-flops introduce the need for proper feedback handling).
 
 ---
 
-## R-10 — Window title shows current file ⏸
+## R-10 — Window title shows current file ✅
 
 **Observation (user, after Phase 13 review).** The GUI window title
 is currently fixed to `"DCS"`. It should show the file the user is

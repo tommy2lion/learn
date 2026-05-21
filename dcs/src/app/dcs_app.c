@@ -33,6 +33,38 @@ static void on_canvas_status(const char *msg, void *user) {
     set_status((dcs_app_t *)user, "%s", msg);
 }
 
+/* Forward decl — extract_basename's body sits a few helpers down. */
+static void extract_basename(const char *path, char *dst, int dst_len);
+
+/* Build the window title from the current file basename + dirty flag and
+   push it to the graphics layer. (R-10) Title format:
+     "DCS — <basename>"        clean
+     "DCS — <basename> *"      dirty
+   The em-dash is intentional — keeps the title scannable. */
+static void refresh_window_title(dcs_app_t *app) {
+    if (!app->graph || !app->graph->set_window_title) return;
+    char base[DOMAIN_NAME_LEN];
+    extract_basename(app->file_path, base, sizeof(base));
+    if (!base[0]) snprintf(base, sizeof(base), "%s", "untitled");
+    char title[DCS_APP_FILE_PATH_LEN + 32];
+    snprintf(title, sizeof(title),
+             app->dirty ? "DCS \xe2\x80\x94 %s *" : "DCS \xe2\x80\x94 %s",
+             base);
+    app->graph->set_window_title(app->graph->self, title);
+}
+
+/* Single funnel for dirty-flag changes — keeps the title in sync. (R-10) */
+static void dcs_app_set_dirty(dcs_app_t *app, int dirty) {
+    int was = app->dirty;
+    app->dirty = dirty ? 1 : 0;
+    if (app->dirty != was) refresh_window_title(app);
+}
+
+/* Canvas mutation hook — any structural / geometric change marks dirty. */
+static void on_canvas_mutated(void *user) {
+    dcs_app_set_dirty((dcs_app_t *)user, 1);
+}
+
 /* Strip directory and ".dcs" extension. dst must be at least DOMAIN_NAME_LEN
    bytes. Empty-input safe — writes "" to dst. */
 static void extract_basename(const char *path, char *dst, int dst_len) {
@@ -140,6 +172,7 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
     apply_display_name_from_path(app, path);
     apply_meta_from_load(app, &parsed_meta);
     set_status(app, "Opened %s", path);
+    dcs_app_set_dirty(app, 0);
 }
 
 static void action_new(dcs_app_t *app) {
@@ -155,6 +188,7 @@ static void action_new(dcs_app_t *app) {
     simulation_init(&app->sim, app->circuit);
     timing_canvas_widget_set_waves(app->timing_canvas, NULL);
     set_status(app, "New circuit");
+    dcs_app_set_dirty(app, 0);
 }
 
 static void action_open(dcs_app_t *app) {
@@ -188,6 +222,7 @@ static void action_save_as(dcs_app_t *app) {
     free(text);
     if (rc != 0) { set_status(app, "Save failed"); return; }
     set_status(app, "Saved to %s", path);
+    dcs_app_set_dirty(app, 0);
 }
 
 static void action_save(dcs_app_t *app) {
@@ -200,8 +235,12 @@ static void action_save(dcs_app_t *app) {
     int n = (int)strlen(text);
     int rc = app->platform->write_file(app->platform->self, app->file_path, text, n);
     free(text);
-    if (rc == 0) set_status(app, "Saved to %s", app->file_path);
-    else         set_status(app, "Save failed");
+    if (rc == 0) {
+        set_status(app, "Saved to %s", app->file_path);
+        dcs_app_set_dirty(app, 0);
+    } else {
+        set_status(app, "Save failed");
+    }
 }
 
 /* ── menu callback ───────────────────────────────────────────────── */
@@ -224,6 +263,11 @@ static void action_toggle_display_mode(dcs_app_t *app) {
     display_mode_t next = (cur == DISPLAY_EXTERNAL) ? DISPLAY_INTERNAL : DISPLAY_EXTERNAL;
     circuit_canvas_widget_set_display_mode(app->circuit_canvas, next);
     set_status(app, next == DISPLAY_EXTERNAL ? "Black-box view" : "Schematic view");
+    /* display_mode is persisted in the .dcs file, so toggling it is a
+       user-driven mutation; mark dirty. The canvas's setter doesn't fire
+       its own mutated_cb because the same setter is also called by
+       apply_meta_from_load (file load path), which must NOT mark dirty. */
+    dcs_app_set_dirty(app, 1);
 }
 
 static void on_view_menu_select(int idx, void *user) {
@@ -416,7 +460,8 @@ static void build_widgets(dcs_app_t *app) {
     app->circuit_canvas = circuit_canvas_widget_create(
         (rect_t){sb_w, HEADER_H, sw - sb_w, panel_top - HEADER_H},
         app->circuit);
-    circuit_canvas_widget_set_status_cb(app->circuit_canvas, on_canvas_status, app);
+    circuit_canvas_widget_set_status_cb (app->circuit_canvas, on_canvas_status,  app);
+    circuit_canvas_widget_set_mutated_cb(app->circuit_canvas, on_canvas_mutated, app);
 
     app->toolbar = side_toolbar_create((rect_t){0, HEADER_H, sb_w, panel_top - HEADER_H},
                                        app->circuit_canvas);
@@ -506,6 +551,9 @@ void dcs_app_init(dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *init
             simulation_init(&self->sim, self->circuit);
         }
     }
+    /* Push the initial title (untitled or loaded basename, no asterisk —
+       dirty is zero from the memset above). */
+    refresh_window_title(self);
 }
 
 void dcs_app_release(dcs_app_t *self) {

@@ -33,6 +33,7 @@ int main(void) {
     check("vt: begin_frame",       g->begin_frame       != NULL);
     check("vt: end_frame",         g->end_frame         != NULL);
     check("vt: screen_size",       g->screen_size       != NULL);
+    check("vt: set_window_title",  g->set_window_title  != NULL);
     check("vt: draw_rect",         g->draw_rect         != NULL);
     check("vt: draw_rect_lines",   g->draw_rect_lines   != NULL);
     check("vt: draw_line",         g->draw_line         != NULL);

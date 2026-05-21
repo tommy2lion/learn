@@ -33,6 +33,14 @@ static void status(circuit_canvas_widget_t *cw, const char *fmt, ...) {
     cw->on_status(buf, cw->status_user);
 }
 
+/* Fire the mutation hook (R-10). Called from every entry point that
+   commits a structural or geometric change. Multiple calls per user
+   gesture (e.g. delete-many) are fine — receivers (dcs_app's dirty
+   flag) are idempotent. */
+static void notify_mutated(circuit_canvas_widget_t *cw) {
+    if (cw && cw->on_mutated) cw->on_mutated(cw->mutated_user);
+}
+
 static vec2_t screen_to_world(const circuit_canvas_widget_t *cw, vec2_t s) {
     return (vec2_t){
         (s.x - cw->cam_offset.x) / cw->cam_zoom + cw->cam_target.x,
@@ -614,6 +622,7 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
             if (circuit_add_input(cw->circuit, in) == 0) {
                 cw->circuit->input_positions[cw->circuit->input_count - 1] = world;
                 status(cw, "Placed %s", in);
+                notify_mutated(cw);
             }
             return;
         }
@@ -623,6 +632,7 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
             if (circuit_add_output(cw->circuit, on) == 0) {
                 cw->circuit->output_positions[cw->circuit->output_count - 1] = world;
                 status(cw, "Placed %s", on);
+                notify_mutated(cw);
             }
             return;
         }
@@ -644,6 +654,7 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
             w->value = SIG_UNDEF;
             cw->circuit->components[cw->circuit->component_count++] = comp;
             status(cw, "Placed %s", comp->name);
+            notify_mutated(cw);
             return;
         }
     }
@@ -660,6 +671,7 @@ static void disconnect_input(circuit_canvas_widget_t *cw, int comp_idx, int pin)
     c->in_wires[pin][0] = '\0';
     if (prev[0]) reseat_wire_geometry(cw, prev);
     assert_geometry_consistent(cw);
+    notify_mutated(cw);
 }
 
 /* Connect: set component[dst].in_wires[pin] to wire produced by `src`.
@@ -698,6 +710,7 @@ static void connect_wire(circuit_canvas_widget_t *cw, node_ref_t src, node_ref_t
         status(cw, "Wired");
     }
     assert_geometry_consistent(cw);
+    notify_mutated(cw);
 }
 
 /* Find a wire entry whose dst is component[dst_idx], pin `pin`. (Editor wires
@@ -786,6 +799,7 @@ static void remove_component_at(circuit_canvas_widget_t *cw, int idx) {
        lost a consumer). Full reseed is the simplest correct response. */
     seed_geometry_from_circuit(cw);
     assert_geometry_consistent(cw);
+    notify_mutated(cw);
 }
 
 static void remove_input_at(circuit_canvas_widget_t *cw, int idx) {
@@ -814,6 +828,7 @@ static void remove_input_at(circuit_canvas_widget_t *cw, int idx) {
     c->input_count--;
     seed_geometry_from_circuit(cw);
     assert_geometry_consistent(cw);
+    notify_mutated(cw);
 }
 
 static void remove_output_at(circuit_canvas_widget_t *cw, int idx) {
@@ -827,6 +842,7 @@ static void remove_output_at(circuit_canvas_widget_t *cw, int idx) {
        segments going to the now-removed output position. Reseed handles it. */
     seed_geometry_from_circuit(cw);
     assert_geometry_consistent(cw);
+    notify_mutated(cw);
 }
 
 /* node_ref indices shift after removals; for delete-many we sort in
@@ -1287,6 +1303,7 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
                cheaper than tracking the touched set. */
             seed_geometry_from_circuit(cw);
             assert_geometry_consistent(cw);
+            notify_mutated(cw);
             return 1;
         }
         return 1;
@@ -1301,6 +1318,7 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             cw->we_net_idx = -1;
             cw->we_seg_idx = -1;
             assert_geometry_consistent(cw);
+            notify_mutated(cw);
             return 1;
         }
         /* ESC cancels via the global poll_global_shortcuts -> cancel_mode
@@ -1360,6 +1378,7 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
                 disconnect_input(cw, w.index, wire_pin);
             } else if (w.kind == NODE_OUTPUT) {
                 cw->circuit->output_names[w.index][0] = '\0';
+                notify_mutated(cw);
             }
             status(cw, "Wire deleted");
             return 1;
@@ -1506,6 +1525,12 @@ void circuit_canvas_widget_set_status_cb(circuit_canvas_widget_t *self,
     self->status_user = user;
 }
 
+void circuit_canvas_widget_set_mutated_cb(circuit_canvas_widget_t *self,
+                                          ccw_mutated_fn_t cb, void *user) {
+    self->on_mutated   = cb;
+    self->mutated_user = user;
+}
+
 void circuit_canvas_widget_arm_place(circuit_canvas_widget_t *self, place_kind_t kind) {
     self->mode = CMODE_PLACING;
     self->place_kind = kind;
@@ -1573,6 +1598,7 @@ void circuit_canvas_widget_nudge_selection(circuit_canvas_widget_t *self,
     }
     seed_geometry_from_circuit(self);
     assert_geometry_consistent(self);
+    notify_mutated(self);
 }
 
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,

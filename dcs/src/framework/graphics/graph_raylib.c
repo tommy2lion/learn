@@ -104,6 +104,11 @@ static void rl_screen_size(void *self, int *w, int *h) {
     if (h) *h = GetScreenHeight();
 }
 
+static void rl_set_window_title(void *self, const char *title) {
+    (void)self;
+    if (title) SetWindowTitle(title);
+}
+
 /* ── drawing primitives ───────────────────────────────────────────── */
 
 static void rl_draw_rect(void *self, rect_t r, uint32_t color) {
@@ -228,6 +233,7 @@ static igraph_t g_graph = {
     .begin_frame       = rl_begin_frame,
     .end_frame         = rl_end_frame,
     .screen_size       = rl_screen_size,
+    .set_window_title  = rl_set_window_title,
 
     .draw_rect         = rl_draw_rect,
     .draw_rect_lines   = rl_draw_rect_lines,

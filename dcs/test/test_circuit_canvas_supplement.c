@@ -20,6 +20,9 @@
 
 static int failures = 0, total = 0;
 
+/* Mutation-callback tally helper for R-10 dirty-flag tests. */
+static void count_mutations(void *user) { (*(int *)user)++; }
+
 static void check(const char *name, int cond) {
     total++;
     printf("%s  %s\n", cond ? "PASS" : "FAIL", name);
@@ -1426,6 +1429,53 @@ int main(void) {
     {
         circuit_canvas_widget_nudge_selection(NULL, 1, 1);
         check("nudge(NULL) is safe", 1);
+    }
+
+    /* ── R-10: mutated_cb fires on nudge ─────────────────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        int fired = 0;
+        circuit_canvas_widget_set_mutated_cb(cw, count_mutations, &fired);
+        circuit_canvas_widget_select_all(cw);  /* selection-only: no fire */
+        check("mutated_cb: select_all doesn't fire", fired == 0);
+        circuit_canvas_widget_nudge_selection(cw, 1, 0);
+        check("mutated_cb: nudge fires once", fired == 1);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-10: mutated_cb fires on delete_selection (one per node) ── */
+    {
+        circuit_t *c = make_simple_circuit();    /* 2 in + 1 comp + 1 out = 4 */
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        int fired = 0;
+        circuit_canvas_widget_set_mutated_cb(cw, count_mutations, &fired);
+        circuit_canvas_widget_select_all(cw);
+        circuit_canvas_widget_delete_selection(cw);
+        check("mutated_cb: delete_selection fires per node (>= 1)",
+              fired >= 1);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-10: mutated_cb NOT fired by set_circuit / cancel / highlight ── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        int fired = 0;
+        circuit_canvas_widget_set_mutated_cb(cw, count_mutations, &fired);
+        /* These are state transitions, not user mutations. None should fire. */
+        circuit_canvas_widget_set_highlight(cw, "A");
+        circuit_canvas_widget_cancel_mode(cw);
+        circuit_canvas_widget_set_display_mode(cw, DISPLAY_EXTERNAL);
+        circuit_canvas_widget_set_display_name(cw, "TestBox");
+        check("mutated_cb: read-only / view ops don't fire", fired == 0);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
     }
 
     printf("\n%d / %d passed\n", total - failures, total);

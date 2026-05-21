@@ -48,6 +48,11 @@ class tagt_dcs_app {
     char  file_path[DCS_APP_FILE_PATH_LEN];
     int   path_is_explicit;
 
+    /* unsaved-changes flag — set by canvas mutation callback, cleared by
+       New/Open/Save. Reflected in the window title as a trailing "*".
+       (R-10) */
+    int   dirty;
+
     /* status message + auto-clear */
     char   status_text[DCS_APP_STATUS_LEN];
     double status_until;
