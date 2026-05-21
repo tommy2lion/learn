@@ -14,6 +14,7 @@
 #include "input_panel.h"
 #include "divider_widget.h"
 #include "help_dialog.h"
+#include "command_stack.h"
 #include "../domain/circuit.h"
 #include "../domain/simulation.h"
 
@@ -56,6 +57,17 @@ class tagt_dcs_app {
        (R-10) */
     int   dirty;
 
+    /* Undo / redo stack (R-5 part 2). The canvas mutation callback
+       serialises the post-mutation state, pairs it with `last_snapshot`
+       (which holds the previous state), builds a snapshot_cmd, and
+       pushes it here. Undo/redo restore by re-parsing the captured
+       strings via install_circuit_text(NULL-path mode). */
+    command_stack_t cmds;
+    /* Cache of the current state as a freshly-serialised string. Updated
+       after every mutation, file load, file new, and undo/redo so the
+       NEXT mutation can build a command with a correct "before". */
+    char           *last_snapshot;
+
     /* status message + auto-clear */
     char   status_text[DCS_APP_STATUS_LEN];
     double status_until;
@@ -68,5 +80,11 @@ typedef class tagt_dcs_app dcs_app_t;
 void dcs_app_init   (dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *initial_path);
 void dcs_app_release(dcs_app_t *self);
 void dcs_app_run    (dcs_app_t *self);
+
+/* Undo / redo entry points (R-5). dcs_app's poll_global_shortcuts
+   (Stage 9c) binds Ctrl+Z to undo and Ctrl+Y to redo. No-op when the
+   corresponding stack is empty. */
+void dcs_app_undo   (dcs_app_t *self);
+void dcs_app_redo   (dcs_app_t *self);
 
 #endif /* DCS_APP_DCS_APP_H */

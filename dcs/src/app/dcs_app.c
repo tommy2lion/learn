@@ -93,10 +93,9 @@ static void dcs_app_set_dirty(dcs_app_t *app, int dirty) {
     refresh_window_title(app);
 }
 
-/* Canvas mutation hook — any structural / geometric change marks dirty. */
-static void on_canvas_mutated(void *user) {
-    dcs_app_set_dirty((dcs_app_t *)user, 1);
-}
+/* Canvas mutation hook — any structural / geometric change marks dirty
+   AND (R-5) snapshots the post-mutation state into an undo command. */
+static void on_canvas_mutated(void *user);
 
 /* "<verb> <path>" + optional "(display: <name>)" when the file's
    @display_name overrides the basename. Used on open/save so the user
@@ -179,9 +178,38 @@ static void apply_meta_from_load(dcs_app_t *app, const circuit_meta_t *meta) {
     }
 }
 
-static void load_circuit_from_text(dcs_app_t *app, const char *path, const char *text) {
+/* Serialise the canvas's current state to a fresh malloc'd string. Used
+   for undo snapshots — captures everything that round-trips through the
+   .dcs format (gates, wires, layout, wire geometry, display mode/name,
+   pin styles). Caller frees. (R-5) */
+static char *serialize_snapshot(const dcs_app_t *app) {
+    if (!app->circuit) return NULL;
+    const wire_geometry_t *geom = circuit_canvas_widget_geometry(app->circuit_canvas);
+    /* For internal snapshots we want the literal display_name (no
+       basename-comparison strip — that's a save-to-file niceity). */
+    circuit_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    meta.display_mode =
+        (int)circuit_canvas_widget_display_mode(app->circuit_canvas);
+    external_view_metadata_t *em =
+        circuit_canvas_widget_external_meta(app->circuit_canvas);
+    snprintf(meta.display_name, sizeof(meta.display_name),
+             "%s", em->display_name);
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        meta.input_styles[i]  = (int)em->input_styles[i];
+        meta.output_styles[i] = (int)em->output_styles[i];
+    }
+    return circuit_io_serialize_ex(app->circuit, geom, &meta);
+}
+
+/* Parse + install circuit text. Returns 0 on success, -1 on parse error.
+   When path != NULL: treats this as a user-initiated file load — updates
+   file_path, prints "Opened path" status, clears the undo/redo stacks
+   (opening a new document discards the previous one's history). When
+   path == NULL: silent snapshot restore (used by undo/redo) — file_path
+   stays, stacks stay, status is set by the caller. (R-5) */
+static int install_circuit_text(dcs_app_t *app, const char *text, const char *path) {
     char err[256] = {0};
-    /* Extract any persisted # @wires block and metadata alongside the circuit. */
     wire_geometry_t parsed_wires;
     wire_geometry_init(&parsed_wires);
     circuit_meta_t parsed_meta;
@@ -190,34 +218,111 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
                                        &parsed_wires, &parsed_meta);
     if (!c) {
         wire_geometry_release(&parsed_wires);
-        set_status(app, "Parse error: %s", err);
-        return;
+        if (path) set_status(app, "Parse error: %s", err);
+        else      set_status(app, "Undo/redo parse error: %s", err);
+        return -1;
     }
     if (app->circuit) circuit_destroy(app->circuit);
     app->circuit = c;
-    /* Run auto-align BEFORE set_circuit so we know whether positions
-       were shifted. If yes, the file's persisted # @wires block was
-       routed against the OLD positions and is now stale — we must
-       keep the freshly-routed geometry from set_circuit's seed.
-       If zero shifts, the file's wires are consistent and we load
-       them (preserving any user Phase-12 bend-drags). */
     int n_align_shifts = circuit_canvas_widget_auto_align(c);
-    /* set_circuit's internal auto_align is a no-op now (idempotent). */
     circuit_canvas_widget_set_circuit(app->circuit_canvas, c);
     if (n_align_shifts == 0 && parsed_wires.net_count > 0) {
         circuit_canvas_widget_load_geometry(app->circuit_canvas, &parsed_wires);
     }
-    wire_geometry_release(&parsed_wires);   /* no-op if moved */
-    /* Reseat the input_panel's circuit reference via its public setter. */
+    wire_geometry_release(&parsed_wires);
     input_panel_set_circuit(app->input_panel, c);
-    snprintf(app->file_path, sizeof(app->file_path), "%s", path);
-    app->path_is_explicit = 1;
-    /* Seed the display name from the basename; the file's # @display_name,
-       if present, will override below in apply_meta_from_load. */
-    apply_display_name_from_path(app, path);
+    if (path) {
+        snprintf(app->file_path, sizeof(app->file_path), "%s", path);
+        app->path_is_explicit = 1;
+        apply_display_name_from_path(app, path);
+    }
     apply_meta_from_load(app, &parsed_meta);
-    set_file_status(app, "Opened", path);
-    dcs_app_set_dirty(app, 0);
+    if (path) {
+        set_file_status(app, "Opened", path);
+        dcs_app_set_dirty(app, 0);
+        /* Opening a new document discards prior history. */
+        command_stack_release(&app->cmds);
+        command_stack_init(&app->cmds);
+    } else {
+        /* Snapshot restore — caller (dcs_app_undo/redo) handles dirty
+           + status + title refresh. */
+    }
+    /* The snapshot cache always equals the current state. */
+    free(app->last_snapshot);
+    app->last_snapshot = serialize_snapshot(app);
+    return 0;
+}
+
+/* Thin wrapper kept for call-site readability; identical to install with
+   a non-NULL path. */
+static void load_circuit_from_text(dcs_app_t *app, const char *path, const char *text) {
+    (void)install_circuit_text(app, text, path);
+}
+
+/* ── R-5 snapshot command ────────────────────────────────────────── */
+
+typedef struct {
+    command_t  base;
+    char      *before;
+    char      *after;
+    dcs_app_t *app;
+} snapshot_cmd_t;
+
+static void snapshot_execute(command_t *self) {
+    snapshot_cmd_t *s = (snapshot_cmd_t *)self;
+    (void)install_circuit_text(s->app, s->after, NULL);
+}
+static void snapshot_undo(command_t *self) {
+    snapshot_cmd_t *s = (snapshot_cmd_t *)self;
+    (void)install_circuit_text(s->app, s->before, NULL);
+}
+static void snapshot_destroy(command_t *self) {
+    snapshot_cmd_t *s = (snapshot_cmd_t *)self;
+    free(s->before);
+    free(s->after);
+    free(s);
+}
+static const char *snapshot_describe(const command_t *self) {
+    (void)self;
+    return "edit";
+}
+
+static const command_vt_t SNAPSHOT_VT = {
+    .execute  = snapshot_execute,
+    .undo     = snapshot_undo,
+    .destroy  = snapshot_destroy,
+    .describe = snapshot_describe,
+};
+
+/* Real on_canvas_mutated body (the forward-decl is up at line ~67).
+   Builds a snapshot_cmd from the previously-cached state (the "before")
+   plus the freshly-serialised current state (the "after"), pushes to
+   the undo stack, and refreshes the cache. (R-5) */
+static void on_canvas_mutated(void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    char *after = serialize_snapshot(app);
+    if (!after) {
+        /* Serialise failed — skip the snapshot but still set dirty so
+           the user knows something changed. */
+        dcs_app_set_dirty(app, 1);
+        return;
+    }
+    if (app->last_snapshot) {
+        snapshot_cmd_t *cmd = (snapshot_cmd_t *)calloc(1, sizeof(*cmd));
+        if (cmd) {
+            cmd->base.vt = &SNAPSHOT_VT;
+            cmd->before  = app->last_snapshot;   /* transfer ownership   */
+            cmd->after   = strdup(after);        /* cache also keeps `after` */
+            cmd->app     = app;
+            app->last_snapshot = NULL;           /* cache about to be replaced */
+            command_stack_push(&app->cmds, &cmd->base);
+        } else {
+            free(app->last_snapshot);
+            app->last_snapshot = NULL;
+        }
+    }
+    app->last_snapshot = after;                  /* transfer; cache := after */
+    dcs_app_set_dirty(app, 1);
 }
 
 static void action_new(dcs_app_t *app) {
@@ -234,6 +339,12 @@ static void action_new(dcs_app_t *app) {
     timing_canvas_widget_set_waves(app->timing_canvas, NULL);
     set_status(app, "New circuit");
     dcs_app_set_dirty(app, 0);
+    /* Reset undo/redo history; refresh snapshot cache to the new empty
+       state so the next mutation builds a correct command. (R-5) */
+    command_stack_release(&app->cmds);
+    command_stack_init(&app->cmds);
+    free(app->last_snapshot);
+    app->last_snapshot = serialize_snapshot(app);
 }
 
 static void action_open(dcs_app_t *app) {
@@ -654,6 +765,7 @@ void dcs_app_init(dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *init
     self->graph    = g;
     self->circuit  = circuit_create();
     simulation_init(&self->sim, self->circuit);
+    command_stack_init(&self->cmds);                /* R-5 */
     snprintf(self->file_path, sizeof(self->file_path),
              "%s", initial_path ? initial_path : "untitled.dcs");
 
@@ -678,6 +790,12 @@ void dcs_app_init(dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *init
             simulation_init(&self->sim, self->circuit);
         }
     }
+    /* Seed the snapshot cache so the FIRST mutation can build an undo
+       entry from a known "before". load_circuit_from_text already does
+       this when it ran; this catches the "no initial path" case. */
+    if (!self->last_snapshot) {
+        self->last_snapshot = serialize_snapshot(self);
+    }
     /* Push the initial title (untitled or loaded basename, no asterisk —
        dirty is zero from the memset above). */
     refresh_window_title(self);
@@ -688,6 +806,9 @@ void dcs_app_release(dcs_app_t *self) {
     simulation_release(&self->sim);
     if (self->circuit) circuit_destroy(self->circuit);
     self->circuit = NULL;
+    command_stack_release(&self->cmds);            /* R-5 */
+    free(self->last_snapshot);
+    self->last_snapshot = NULL;
 }
 
 void dcs_app_run(dcs_app_t *self) {
@@ -695,4 +816,28 @@ void dcs_app_run(dcs_app_t *self) {
         poll_global_shortcuts(self);
         frame_tick(&self->frame);
     }
+}
+
+void dcs_app_undo(dcs_app_t *self) {
+    const char *desc = command_stack_undo(&self->cmds);
+    if (!desc) { set_status(self, "Nothing to undo"); return; }
+    /* install_circuit_text (called inside the command's undo) already
+       refreshed last_snapshot to the restored state. */
+    set_status(self, "Undid: %s", desc);
+    dcs_app_set_dirty(self, 1);   /* even after undo, state differs from
+                                     the last saved state on disk */
+    /* simulation references the old circuit_t — reseat. */
+    simulation_release(&self->sim);
+    simulation_init(&self->sim, self->circuit);
+    timing_canvas_widget_set_waves(self->timing_canvas, NULL);
+}
+
+void dcs_app_redo(dcs_app_t *self) {
+    const char *desc = command_stack_redo(&self->cmds);
+    if (!desc) { set_status(self, "Nothing to redo"); return; }
+    set_status(self, "Redid: %s", desc);
+    dcs_app_set_dirty(self, 1);
+    simulation_release(&self->sim);
+    simulation_init(&self->sim, self->circuit);
+    timing_canvas_widget_set_waves(self->timing_canvas, NULL);
 }
