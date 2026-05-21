@@ -9,7 +9,7 @@
    dependencies, so it can be included from domain / framework / app code
    without violating any layering invariant. */
 
-typedef struct {
+typedef struct tagt_sha256_ctx {
     uint32_t state[8];
     uint64_t bitlen;
     uint8_t  buf[64];

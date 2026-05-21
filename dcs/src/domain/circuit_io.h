@@ -8,7 +8,7 @@
    data — domain-friendly (no UI / raylib / function pointer deps). The
    app layer marshals between this and its richer metadata struct.
    Phase 10. */
-typedef struct {
+typedef struct tagt_circuit_meta {
     /* 0 == DISPLAY_INTERNAL (default), 1 == DISPLAY_EXTERNAL */
     int  display_mode;
     /* Label drawn inside the external-view box; empty == no override

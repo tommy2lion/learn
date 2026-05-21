@@ -6,8 +6,12 @@
 /* ── content (DCS-specific; lives here, not in framework, until a second
        caller wants the modal mechanism) ───────────────────────────────── */
 
-typedef struct { const char *shortcut; const char *action; } help_entry_t;
-typedef struct {
+typedef struct tagt_help_entry {
+    const char *shortcut;
+    const char *action;
+} help_entry_t;
+
+typedef struct tagt_help_section {
     const char         *title;
     const help_entry_t *entries;
     int                 n;

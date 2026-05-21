@@ -261,7 +261,7 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
 
 /* ── R-5 snapshot command ────────────────────────────────────────── */
 
-typedef struct {
+typedef struct tagt_snapshot_cmd {
     command_t  base;
     char      *before;
     char      *after;
