@@ -138,15 +138,29 @@ int wire_geometry_shift_segment(wire_geometry_t *self, int net_idx,
 int wire_geometry_shift_v_bus(wire_geometry_t *self, int net_idx,
                               float column_x, float delta);
 
-/* Optional context for obstacle-aware routing (U-40, Stage 4).
-   When the V column of a Z-route or a Steiner V-bus would cross a
-   component body, the router shifts the column to avoid the obstacle.
-   The struct grows with U-41 (channelled layout) to also carry the
-   reserved routing-channel rects. */
+/* Optional context for obstacle-aware routing (U-40, Stage 4) and
+   channelled routing (U-41, Stage 4B). The router consults the channel
+   rects when deciding where to put V buses and how to detour H stubs
+   around component bodies.
+
+   As of Stage 4B.3 the channels are populated but the router still
+   ignores them — they get wired up in Stage 4B.4. */
 typedef struct tagt_route_context {
-    const rect_t *obstacles;     /* component bboxes; pin edges count as touching, not crossing */
+    /* U-40: component bounding boxes — pin edges count as touching,
+       not crossing (strict-inequality test in the router). */
+    const rect_t *obstacles;
     int           n_obstacles;
-    /* future: channels for U-41 */
+
+    /* U-41 Stage 4B.3 — reserved routing channels. Each rect is a
+       strip of "free space" (no gates, no other channels overlapping)
+       through which wires can flow. v_channels are vertical strips
+       between depth columns; h_channels are horizontal strips between
+       row y-positions. Empty / NULL fields = "no channels, fall back
+       to obstacle-shift behaviour from Stage 4". */
+    const rect_t *v_channels;
+    int           n_v_channels;
+    const rect_t *h_channels;
+    int           n_h_channels;
 } route_context_t;
 
 /* Compute an orthogonal route from producer_pin to consumer_pin and append

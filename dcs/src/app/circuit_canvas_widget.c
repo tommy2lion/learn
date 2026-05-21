@@ -210,6 +210,109 @@ static void auto_layout(circuit_t *c) {
     free(num_sub_cols); free(base_global_col);
 }
 
+/* ── U-41 Stage 4B.3: layout channels ────────────────────────────── */
+
+static int float_cmp(const void *a, const void *b) {
+    float fa = *(const float *)a;
+    float fb = *(const float *)b;
+    return (fa < fb) ? -1 : (fa > fb) ? 1 : 0;
+}
+
+static void release_layout_channels(circuit_canvas_widget_t *cw) {
+    free(cw->v_channels); cw->v_channels = NULL; cw->v_channel_count = 0;
+    free(cw->h_channels); cw->h_channels = NULL; cw->h_channel_count = 0;
+}
+
+/* Emit V-channel and H-channel rects from the laid-out circuit.
+   - V channels sit between adjacent unique component x positions, span
+     the full vertical extent of all components.
+   - H channels sit between adjacent unique component y positions, span
+     the full horizontal extent.
+   A gap narrower than LAYOUT_V_CHANNEL_WIDTH / LAYOUT_H_CHANNEL_HEIGHT
+   is skipped (no room). Channels are owned by the widget and freed by
+   release_layout_channels.
+
+   This is pure infrastructure — populated and stored, but the router
+   doesn't consult it until Stage 4B.4. */
+static void compute_layout_channels(circuit_canvas_widget_t *cw) {
+    release_layout_channels(cw);
+    circuit_t *c = cw->circuit;
+    if (!c) return;
+
+    int max_pos = c->input_count + c->component_count + c->output_count;
+    if (max_pos <= 0) return;
+    float *xs = (float *)malloc(sizeof(float) * max_pos);
+    float *ys = (float *)malloc(sizeof(float) * max_pos);
+    if (!xs || !ys) { free(xs); free(ys); return; }
+    int n_xs = 0, n_ys = 0;
+
+#define INSERT_UNIQUE(arr, n_var, v) do {                       \
+        int found_ = 0;                                          \
+        for (int k = 0; k < (n_var); k++)                        \
+            if ((arr)[k] == (v)) { found_ = 1; break; }          \
+        if (!found_) (arr)[(n_var)++] = (v);                     \
+    } while (0)
+
+    for (int i = 0; i < c->input_count; i++) {
+        INSERT_UNIQUE(xs, n_xs, c->input_positions[i].x);
+        INSERT_UNIQUE(ys, n_ys, c->input_positions[i].y);
+    }
+    for (int i = 0; i < c->component_count; i++) {
+        INSERT_UNIQUE(xs, n_xs, c->components[i]->position.x);
+        INSERT_UNIQUE(ys, n_ys, c->components[i]->position.y);
+    }
+    for (int i = 0; i < c->output_count; i++) {
+        INSERT_UNIQUE(xs, n_xs, c->output_positions[i].x);
+        INSERT_UNIQUE(ys, n_ys, c->output_positions[i].y);
+    }
+#undef INSERT_UNIQUE
+
+    qsort(xs, n_xs, sizeof(float), float_cmp);
+    qsort(ys, n_ys, sizeof(float), float_cmp);
+
+    float y_min = n_ys > 0 ? ys[0]          - GATE_H : 0;
+    float y_max = n_ys > 0 ? ys[n_ys - 1]   + GATE_H : 0;
+    float x_min = n_xs > 0 ? xs[0]          - GATE_W : 0;
+    float x_max = n_xs > 0 ? xs[n_xs - 1]   + GATE_W : 0;
+
+    if (n_xs > 1) {
+        cw->v_channels = (rect_t *)calloc(n_xs - 1, sizeof(rect_t));
+        if (cw->v_channels) {
+            for (int i = 0; i + 1 < n_xs; i++) {
+                float x_left  = xs[i]     + GATE_W * 0.5f;
+                float x_right = xs[i + 1] - GATE_W * 0.5f;
+                if (x_right - x_left < LAYOUT_V_CHANNEL_WIDTH) continue;
+                rect_t r = {
+                    (x_left + x_right - LAYOUT_V_CHANNEL_WIDTH) * 0.5f,
+                    y_min,
+                    LAYOUT_V_CHANNEL_WIDTH,
+                    y_max - y_min,
+                };
+                cw->v_channels[cw->v_channel_count++] = r;
+            }
+        }
+    }
+    if (n_ys > 1) {
+        cw->h_channels = (rect_t *)calloc(n_ys - 1, sizeof(rect_t));
+        if (cw->h_channels) {
+            for (int i = 0; i + 1 < n_ys; i++) {
+                float y_top = ys[i]     + GATE_H * 0.5f;
+                float y_bot = ys[i + 1] - GATE_H * 0.5f;
+                if (y_bot - y_top < LAYOUT_H_CHANNEL_HEIGHT) continue;
+                rect_t r = {
+                    x_min,
+                    (y_top + y_bot - LAYOUT_H_CHANNEL_HEIGHT) * 0.5f,
+                    x_max - x_min,
+                    LAYOUT_H_CHANNEL_HEIGHT,
+                };
+                cw->h_channels[cw->h_channel_count++] = r;
+            }
+        }
+    }
+
+    free(xs); free(ys);
+}
+
 /* ── per-node geometry ────────────────────────────────────────────── */
 
 static vec2_t node_position(const circuit_t *c, node_ref_t r) {
@@ -488,10 +591,19 @@ static void seed_geometry_from_circuit(circuit_canvas_widget_t *cw) {
     if (!c) return;
 
     /* U-40: build the obstacle list once and reuse for every net's
-       routing call. (Cheap — just stack-allocated rects.) */
+       routing call. U-41 (Stage 4B.3): also thread the layout
+       channels through ctx — the router consults them starting in
+       Stage 4B.4. */
     rect_t obs[MAX_OBSTACLES];
     int n_obs = build_component_obstacles(c, obs, MAX_OBSTACLES);
-    route_context_t ctx = { .obstacles = obs, .n_obstacles = n_obs };
+    route_context_t ctx = {
+        .obstacles    = obs,
+        .n_obstacles  = n_obs,
+        .v_channels   = cw->v_channels,
+        .n_v_channels = cw->v_channel_count,
+        .h_channels   = cw->h_channels,
+        .n_h_channels = cw->h_channel_count,
+    };
 
     /* Producer-wire iteration: each input contributes its name; each
        component contributes its output-wire name. For each, gather every
@@ -529,11 +641,19 @@ static void reseat_wire_geometry(circuit_canvas_widget_t *cw, const char *wire_n
     vec2_t consumers[MAX_CCW_FANOUT];
     int n = collect_consumer_pins(c, wire_name, consumers, MAX_CCW_FANOUT);
 
-    /* U-40: feed the obstacle list so single-net reseats avoid bodies
-       just like the bulk seed_geometry path does. */
+    /* U-40 + U-41 Stage 4B.3: feed the obstacle list AND the layout
+       channels so single-net reseats see the same context as the bulk
+       seed_geometry path. */
     rect_t obs[MAX_OBSTACLES];
     int n_obs = build_component_obstacles(c, obs, MAX_OBSTACLES);
-    route_context_t ctx = { .obstacles = obs, .n_obstacles = n_obs };
+    route_context_t ctx = {
+        .obstacles    = obs,
+        .n_obstacles  = n_obs,
+        .v_channels   = cw->v_channels,
+        .n_v_channels = cw->v_channel_count,
+        .h_channels   = cw->h_channels,
+        .n_h_channels = cw->h_channel_count,
+    };
     if (n > 0) auto_route_net_ctx(&cw->wires, wire_name, producer, consumers, n, &ctx);
 }
 
@@ -1541,6 +1661,7 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
 static void ccw_destroy(widget_t *self) {
     circuit_canvas_widget_t *cw = (circuit_canvas_widget_t *)self;
     wire_geometry_release(&cw->wires);
+    release_layout_channels(cw);                /* Stage 4B.3 */
     free(cw);
 }
 
@@ -1577,6 +1698,7 @@ circuit_canvas_widget_t *circuit_canvas_widget_create(rect_t bounds, circuit_t *
     if (c) {
         auto_layout(c);
         circuit_canvas_widget_auto_align(c);
+        compute_layout_channels(cw);              /* Stage 4B.3 */
         seed_geometry_from_circuit(cw);
         circuit_canvas_widget_fit_view(cw);
         cw->counter_in   = c->input_count;
@@ -1592,12 +1714,14 @@ void circuit_canvas_widget_set_circuit(circuit_canvas_widget_t *self, circuit_t 
     if (c) {
         auto_layout(c);
         circuit_canvas_widget_auto_align(c);
+        compute_layout_channels(self);            /* Stage 4B.3 */
         seed_geometry_from_circuit(self);
         circuit_canvas_widget_fit_view(self);
         self->counter_in   = c->input_count;
         self->counter_out  = c->output_count;
         self->counter_gate = c->component_count;
     } else {
+        release_layout_channels(self);            /* Stage 4B.3 */
         seed_geometry_from_circuit(self);   /* clears geometry when circuit goes NULL */
     }
 }

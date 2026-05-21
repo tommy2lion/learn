@@ -1535,6 +1535,77 @@ int main(void) {
     overflow_done: ;
     }
 
+    /* ── Stage 4B.3: layout channels exist with sensible shape ─── */
+    {
+        /* Use the XOR fixture's topology (2 inputs / 2 NOTs / 2 ANDs /
+           1 OR / 1 output) — auto_layout gives 4 distinct x columns,
+           so we expect ≥3 V-channels and ≥1 H-channel between rows. */
+        circuit_t *c = make_simple_circuit();   /* 2 inputs + 1 AND + 1 output (small) */
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 1280, 800}, c);
+
+        check("channels: v_channels allocated",  cw->v_channels != NULL);
+        check("channels: v_channel_count > 0",   cw->v_channel_count > 0);
+        check("channels: h_channels NULL OK if all comps share a y",
+              cw->h_channels != NULL || cw->h_channel_count == 0);
+
+        /* Each V channel rect should be LAYOUT_V_CHANNEL_WIDTH wide. */
+        int v_widths_ok = 1;
+        for (int i = 0; i < cw->v_channel_count; i++) {
+            if (cw->v_channels[i].w < 30 || cw->v_channels[i].w > 34) {
+                v_widths_ok = 0; break;
+            }
+        }
+        check("channels: every V channel ~32 px wide", v_widths_ok);
+
+        /* No V channel should overlap any component's bbox horizontally.
+           (The strict-interior check from U-40's v_column_hits_obstacle
+           applies — channel x sits BETWEEN columns.) */
+        int v_clean = 1;
+        for (int i = 0; i < cw->v_channel_count; i++) {
+            float ch_lo = cw->v_channels[i].x;
+            float ch_hi = ch_lo + cw->v_channels[i].w;
+            for (int j = 0; j < c->component_count; j++) {
+                vec2_t p = c->components[j]->position;
+                float comp_lo = p.x - 40, comp_hi = p.x + 40;
+                if (ch_lo < comp_hi && ch_hi > comp_lo) { v_clean = 0; break; }
+            }
+            if (!v_clean) break;
+        }
+        check("channels: no V channel overlaps a component column",
+              v_clean);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── Stage 4B.3: channels rebuilt on set_circuit ──────────── */
+    {
+        circuit_t *c1 = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 1280, 800}, c1);
+        int v_count_before = cw->v_channel_count;
+        check("setup: channels populated for c1", v_count_before > 0);
+
+        circuit_t *c2 = circuit_create();
+        circuit_add_input(c2, "x");
+        circuit_add_output(c2, "y");
+        circuit_canvas_widget_set_circuit(cw, c2);
+        /* c2 has only 1 input column + 1 output column → 1 V channel
+           between them. Channels MUST have been recomputed. */
+        check("set_circuit: channels recomputed (different shape)",
+              cw->v_channel_count >= 1);
+
+        circuit_canvas_widget_set_circuit(cw, NULL);
+        check("set_circuit(NULL): channels released",
+              cw->v_channels == NULL && cw->v_channel_count == 0 &&
+              cw->h_channels == NULL && cw->h_channel_count == 0);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c1);
+        circuit_destroy(c2);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

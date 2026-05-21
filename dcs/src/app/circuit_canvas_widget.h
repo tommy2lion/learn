@@ -86,6 +86,16 @@ class tagt_circuit_canvas_widget {
        sites). */
     wire_geometry_t wires;
 
+    /* U-41 Stage 4B.3 — reserved routing channels emitted by
+       auto_layout. v_channels are vertical strips between depth
+       columns; h_channels are horizontal strips between row y-
+       positions. Owned by the widget; freed in widget_destroy. The
+       router reads them via route_context_t (wired up in Stage 4B.4). */
+    rect_t *v_channels;
+    int     v_channel_count;
+    rect_t *h_channels;
+    int     h_channel_count;
+
     /* Click-to-highlight: empty string = no highlight (Phase 6). */
     char highlighted_net[DOMAIN_NAME_LEN];
 
