@@ -10,18 +10,19 @@
 #include <windows.h>
 #include <commdlg.h>
 
-/* Phase 2.1 keeps file dialogs unparented (hwndOwner = NULL). When igraph
-   is wired up in Phase 2.2 we'll let the app pass in a window handle. */
+/* File-dialog owner: when callers pass the raylib HWND via the new
+   `owner` parameter, the dialog centres on our window and is window-
+   modal. NULL falls back to unparented (screen-centred). */
 
 static const char *DCS_FILTER =
     "DCS Files (*.dcs)\0*.dcs\0All Files (*.*)\0*.*\0";
 
-static int win_open_file(void *self, const char *title, char *out, int max) {
+static int win_open_file(void *self, void *owner, const char *title, char *out, int max) {
     (void)self;
     char file[MAX_PATH] = {0};
     OPENFILENAMEA ofn = {0};
     ofn.lStructSize  = sizeof(ofn);
-    ofn.hwndOwner    = NULL;
+    ofn.hwndOwner    = (HWND)owner;
     ofn.lpstrFile    = file;
     ofn.nMaxFile     = sizeof(file);
     ofn.lpstrFilter  = DCS_FILTER;
@@ -34,12 +35,12 @@ static int win_open_file(void *self, const char *title, char *out, int max) {
     return 1;
 }
 
-static int win_save_file(void *self, const char *title, char *out, int max) {
+static int win_save_file(void *self, void *owner, const char *title, char *out, int max) {
     (void)self;
     char file[MAX_PATH] = {0};
     OPENFILENAMEA ofn = {0};
     ofn.lStructSize  = sizeof(ofn);
-    ofn.hwndOwner    = NULL;
+    ofn.hwndOwner    = (HWND)owner;
     ofn.lpstrFile    = file;
     ofn.nMaxFile     = sizeof(file);
     ofn.lpstrFilter  = DCS_FILTER;
@@ -100,17 +101,53 @@ static int win_set_clipboard(void *self, const char *text) {
     return 0;
 }
 
+/* MessageBoxA does NOT automatically centre on the owner HWND on any
+   Windows version we care about — it screen-centres regardless of
+   whether hWnd is set. The well-known Win32 workaround is a thread-
+   local CBT hook that catches the dialog's HCBT_ACTIVATE event and
+   repositions it. (Alternative: use TaskDialog, but that adds a v6
+   common-controls dependency and a manifest, more invasive than this
+   ~20-line hook.) */
+static HHOOK g_centre_hook       = NULL;
+static HWND  g_centre_dialog_owner = NULL;
+
+static LRESULT CALLBACK centre_cbt_proc(int code, WPARAM wParam, LPARAM lParam) {
+    if (code == HCBT_ACTIVATE && g_centre_dialog_owner) {
+        HWND dlg = (HWND)wParam;
+        RECT owner_rect, dlg_rect;
+        if (GetWindowRect(g_centre_dialog_owner, &owner_rect) &&
+            GetWindowRect(dlg, &dlg_rect)) {
+            int ow = owner_rect.right  - owner_rect.left;
+            int oh = owner_rect.bottom - owner_rect.top;
+            int dw = dlg_rect.right    - dlg_rect.left;
+            int dh = dlg_rect.bottom   - dlg_rect.top;
+            int x  = owner_rect.left + (ow - dw) / 2;
+            int y  = owner_rect.top  + (oh - dh) / 2;
+            SetWindowPos(dlg, NULL, x, y, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+    return CallNextHookEx(g_centre_hook, code, wParam, lParam);
+}
+
 static dialog_result_t win_confirm_yes_no_cancel(void *self,
                                                  void *owner,
                                                  const char *title,
                                                  const char *message) {
     (void)self;
-    /* With a non-NULL owner the dialog centres on it and is window-modal;
-       NULL falls back to screen-centred + application-modal. */
     UINT flags = MB_YESNOCANCEL | MB_ICONQUESTION;
-    flags |= owner ? MB_TASKMODAL : MB_APPLMODAL;
+    if (owner) {
+        g_centre_dialog_owner = (HWND)owner;
+        g_centre_hook = SetWindowsHookExA(WH_CBT, centre_cbt_proc,
+                                          NULL, GetCurrentThreadId());
+    }
     int r = MessageBoxA((HWND)owner,
                         message ? message : "", title ? title : "", flags);
+    if (g_centre_hook) {
+        UnhookWindowsHookEx(g_centre_hook);
+        g_centre_hook         = NULL;
+        g_centre_dialog_owner = NULL;
+    }
     switch (r) {
         case IDYES:    return DLG_YES;
         case IDNO:     return DLG_NO;

@@ -347,9 +347,19 @@ static void action_new(dcs_app_t *app) {
     app->last_snapshot = serialize_snapshot(app);
 }
 
+/* Native HWND/etc. of the program window, used to centre OS dialogs
+   on our window rather than the screen. NULL when the backend doesn't
+   expose one. */
+static void *native_owner(const dcs_app_t *app) {
+    return (app->graph && app->graph->get_native_window_handle)
+        ? app->graph->get_native_window_handle(app->graph->self)
+        : NULL;
+}
+
 static void action_open(dcs_app_t *app) {
     char path[DCS_APP_FILE_PATH_LEN] = {0};
-    if (!app->platform->open_file(app->platform->self, "Open .dcs", path, sizeof(path))) return;
+    if (!app->platform->open_file(app->platform->self, native_owner(app),
+                                  "Open .dcs", path, sizeof(path))) return;
     int len = 0;
     char *text = app->platform->read_file(app->platform->self, path, &len);
     if (!text) { set_status(app, "Cannot read %s", path); return; }
@@ -363,7 +373,8 @@ static void action_open(dcs_app_t *app) {
 
 static void action_save_as(dcs_app_t *app) {
     char path[DCS_APP_FILE_PATH_LEN] = {0};
-    if (!app->platform->save_file(app->platform->self, "Save .dcs", path, sizeof(path))) return;
+    if (!app->platform->save_file(app->platform->self, native_owner(app),
+                                  "Save .dcs", path, sizeof(path))) return;
     /* Update file_path BEFORE packing meta so the basename comparison
        in pack_meta_for_save uses the new filename. */
     snprintf(app->file_path, sizeof(app->file_path), "%s", path);
@@ -421,13 +432,8 @@ static int on_attempt_quit(void *user) {
     char msg[256];
     snprintf(msg, sizeof(msg),
              "Save changes to %s before closing?", base);
-    /* Centre the dialog on our window. NULL fallback if the backend
-       doesn't expose a native handle (Windows then screen-centres). */
-    void *owner = app->graph && app->graph->get_native_window_handle
-        ? app->graph->get_native_window_handle(app->graph->self)
-        : NULL;
     dialog_result_t r = app->platform->confirm_yes_no_cancel(
-        app->platform->self, owner, "Unsaved changes", msg);
+        app->platform->self, native_owner(app), "Unsaved changes", msg);
     if (r == DLG_YES) {
         action_save(app);
         return app->dirty ? 0 : 1;   /* save failure / save-as cancel → veto */

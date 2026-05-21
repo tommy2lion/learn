@@ -11,13 +11,13 @@
 /* Phase 2.1 stub: file I/O and time work; dialogs and clipboard are no-ops
    until Phase 2.7 wires up zenity (with graceful fallback when missing). */
 
-static int lnx_open_file(void *self, const char *title, char *out, int max) {
-    (void)self; (void)title; (void)out; (void)max;
+static int lnx_open_file(void *self, void *owner, const char *title, char *out, int max) {
+    (void)self; (void)owner; (void)title; (void)out; (void)max;
     return 0;
 }
 
-static int lnx_save_file(void *self, const char *title, char *out, int max) {
-    (void)self; (void)title; (void)out; (void)max;
+static int lnx_save_file(void *self, void *owner, const char *title, char *out, int max) {
+    (void)self; (void)owner; (void)title; (void)out; (void)max;
     return 0;
 }
 

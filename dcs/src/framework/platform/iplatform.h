@@ -22,9 +22,14 @@ typedef enum {
 interface tagt_iplatform {
     void *self;
 
-    /* file dialogs: return 1 on success (path written to out), 0 on cancel/error */
-    int   (*open_file)  (void *self, const char *title, char *out, int max);
-    int   (*save_file)  (void *self, const char *title, char *out, int max);
+    /* File dialogs. `owner` is the native OS window handle (typically
+       from igraph_t::get_native_window_handle) used so the dialog
+       centres on the program's window instead of the screen and is
+       window-modal; NULL = unparented (screen-centred, application-
+       modal). Return 1 on success (path written to out), 0 on
+       cancel/error. */
+    int   (*open_file)  (void *self, void *owner, const char *title, char *out, int max);
+    int   (*save_file)  (void *self, void *owner, const char *title, char *out, int max);
 
     /* Show a modal 3-button confirmation dialog. `owner` is the native
        OS window handle (typically from igraph_t::get_native_window_handle)
