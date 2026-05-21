@@ -299,6 +299,18 @@ static void poll_global_shortcuts(dcs_app_t *app) {
        were dead code before this. */
     if (!ctrl && g->key_pressed(g->self, IK_ESCAPE))
         circuit_canvas_widget_cancel_mode(app->circuit_canvas);
+    /* Arrow keys nudge the canvas selection by 1 px each press (R-19).
+       Edge-triggered (one tap = one pixel) so alignment stays precise.
+       Diagonal nudge works naturally — both arrows can fire in one frame. */
+    if (!ctrl) {
+        int dx = 0, dy = 0;
+        if (g->key_pressed(g->self, IK_LEFT))  dx = -1;
+        if (g->key_pressed(g->self, IK_RIGHT)) dx = +1;
+        if (g->key_pressed(g->self, IK_UP))    dy = -1;
+        if (g->key_pressed(g->self, IK_DOWN))  dy = +1;
+        if (dx || dy)
+            circuit_canvas_widget_nudge_selection(app->circuit_canvas, dx, dy);
+    }
     /* Keyboard zoom — Ctrl+= (the '+' key without Shift) zooms in,
        Ctrl+- zooms out. Mirrors the mouse-wheel zoom but focuses on
        the current cam_offset (typically the canvas centre). */

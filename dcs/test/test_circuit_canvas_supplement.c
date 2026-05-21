@@ -1343,6 +1343,91 @@ int main(void) {
         check("cancel_mode(NULL) is safe", 1);
     }
 
+    /* ── R-19: nudge moves every selected node by (dx, dy) ─────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        /* Capture initial positions so we compare deltas, not absolutes —
+           seed_geometry / auto-align may have already adjusted them. */
+        vec2_t in0_before   = c->input_positions[0];
+        vec2_t in1_before   = c->input_positions[1];
+        vec2_t comp_before  = c->components[0]->position;
+        vec2_t out0_before  = c->output_positions[0];
+
+        circuit_canvas_widget_select_all(cw);
+        circuit_canvas_widget_nudge_selection(cw, 3, -2);
+
+        check("nudge: input[0].x += 3", c->input_positions[0].x == in0_before.x + 3);
+        check("nudge: input[0].y -= 2", c->input_positions[0].y == in0_before.y - 2);
+        check("nudge: input[1] also moved",
+              c->input_positions[1].x == in1_before.x + 3 &&
+              c->input_positions[1].y == in1_before.y - 2);
+        check("nudge: component moved by same delta",
+              c->components[0]->position.x == comp_before.x + 3 &&
+              c->components[0]->position.y == comp_before.y - 2);
+        check("nudge: output moved by same delta",
+              c->output_positions[0].x == out0_before.x + 3 &&
+              c->output_positions[0].y == out0_before.y - 2);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-19: nudge with empty selection is a no-op ─────────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        vec2_t comp_before = c->components[0]->position;
+        circuit_canvas_widget_nudge_selection(cw, 5, 5);   /* no selection */
+        check("nudge: empty selection leaves positions intact",
+              c->components[0]->position.x == comp_before.x &&
+              c->components[0]->position.y == comp_before.y);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-19: nudge moves only selected nodes, not unselected ───── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        vec2_t in0_before  = c->input_positions[0];
+        vec2_t in1_before  = c->input_positions[1];
+        /* Select only the first input. */
+        cw->selection[0]    = (node_ref_t){NODE_INPUT, 0};
+        cw->selection_count = 1;
+        circuit_canvas_widget_nudge_selection(cw, 4, 0);
+        check("nudge: selected input moved",
+              c->input_positions[0].x == in0_before.x + 4);
+        check("nudge: unselected input unchanged",
+              c->input_positions[1].x == in1_before.x &&
+              c->input_positions[1].y == in1_before.y);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-19: nudge with (0, 0) is a no-op (early exit) ─────────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        vec2_t comp_before = c->components[0]->position;
+        circuit_canvas_widget_select_all(cw);
+        circuit_canvas_widget_nudge_selection(cw, 0, 0);
+        check("nudge(0,0): position unchanged",
+              c->components[0]->position.x == comp_before.x &&
+              c->components[0]->position.y == comp_before.y);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-19: nudge(NULL) is safe ─────────────────────────────── */
+    {
+        circuit_canvas_widget_nudge_selection(NULL, 1, 1);
+        check("nudge(NULL) is safe", 1);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

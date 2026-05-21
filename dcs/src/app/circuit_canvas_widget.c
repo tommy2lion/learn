@@ -1548,6 +1548,33 @@ void circuit_canvas_widget_cancel_mode(circuit_canvas_widget_t *self) {
     selection_clear(self);
 }
 
+void circuit_canvas_widget_nudge_selection(circuit_canvas_widget_t *self,
+                                           int dx, int dy) {
+    if (!self || !self->circuit) return;
+    if (self->selection_count == 0)  return;
+    if (dx == 0 && dy == 0)          return;
+    for (int i = 0; i < self->selection_count; i++) {
+        node_ref_t r = self->selection[i];
+        switch (r.kind) {
+            case NODE_COMPONENT:
+                self->circuit->components[r.index]->position.x += (float)dx;
+                self->circuit->components[r.index]->position.y += (float)dy;
+                break;
+            case NODE_INPUT:
+                self->circuit->input_positions[r.index].x += (float)dx;
+                self->circuit->input_positions[r.index].y += (float)dy;
+                break;
+            case NODE_OUTPUT:
+                self->circuit->output_positions[r.index].x += (float)dx;
+                self->circuit->output_positions[r.index].y += (float)dy;
+                break;
+            default: break;
+        }
+    }
+    seed_geometry_from_circuit(self);
+    assert_geometry_consistent(self);
+}
+
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
                                          const char *wire_name) {
     if (!wire_name || !wire_name[0]) {

@@ -43,10 +43,11 @@ wrong, regardless of test-suite green.
 
 ## What's IN scope for this plan
 
-These nine refinement items can land **without** Step-3 prerequisites:
+These refinement items can land **without** Step-3 prerequisites:
 
 - **R-12** Ctrl+A select all
 - **R-13** Del key deletes selection
+- **R-19** Arrow-key nudge selection by 1 px
 - **R-10** Window title shows current file
 - **R-11** Save-on-close prompt
 - **R-14** Help menu + F1
@@ -56,8 +57,7 @@ These nine refinement items can land **without** Step-3 prerequisites:
 - **R-1** Display name first-class
 - **R-5** Undo / Redo (Command pattern)
 
-That's nine entries across **roughly 10–13 commits** depending on
-sub-staging.
+Roughly 11–14 commits depending on sub-staging.
 
 ## What's OUT of scope (Step-3 territory)
 
@@ -100,6 +100,30 @@ These need Step-3 work to land first; documented in
 - Manual: `Ctrl+A` highlights every node; `Del` deletes them.
 
 **Commit subject.** `Add Ctrl+A select-all and Del delete-selection (R-12, R-13)`
+
+---
+
+## Stage 1.5 — Arrow-key nudge selected components by 1 px (R-19) ✅
+
+**Goal.** Arrow keys nudge the selected components / inputs / outputs
+by exactly 1 pixel in their direction — precise manual alignment to
+complement R-7's 8-px snap. Edge-triggered (one tap = one pixel).
+
+**Touches.**
+- `src/app/circuit_canvas_widget.{h,c}` — new public
+  `circuit_canvas_widget_nudge_selection(self, dx, dy)`.
+- `src/app/dcs_app.c` — `poll_global_shortcuts` reads IK_LEFT /
+  IK_RIGHT / IK_UP / IK_DOWN, combines into a (dx, dy), dispatches.
+- `test/test_circuit_canvas_supplement.c` — 10 cases (per-node-type
+  delta, diagonal, empty-selection no-op, partial-selection
+  isolation, (0,0) no-op, NULL safety).
+
+**Done when.**
+- Arrow keys move every selected node by 1 px each press; wires
+  follow.
+- Full suite green.
+
+**Commit subject.** `Add arrow-key 1-px nudge for precise alignment (R-19)`
 
 ---
 

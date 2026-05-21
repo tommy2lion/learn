@@ -822,6 +822,38 @@ S for option 1, M for option 2.
 
 ---
 
+## R-19 — Arrow-key nudge selected components by 1 px ✅
+
+**Observation (user).** Auto-align (R-7) snaps within an 8 px
+window, but a circuit can still finish open with components a few
+pixels off the "perfect" line, or the user may want precise manual
+positioning that doesn't trip the snap threshold. Mouse drag is too
+coarse for single-pixel alignment.
+
+**Proposal.** When the selection is non-empty, the four arrow keys
+nudge every selected node by 1 pixel in the corresponding direction.
+Edge-triggered (one tap = one pixel) so alignment stays predictable
+— hold-to-repeat would defeat the precision use case. Diagonals
+work naturally: two arrows pressed in the same frame combine.
+
+**Implementation.** New public
+`circuit_canvas_widget_nudge_selection(self, dx, dy)` mutates the
+position of every selected input / component / output and re-seeds
+wire geometry so connected wires follow. Wired into
+`poll_global_shortcuts` using the same global-dispatch pattern as
+Ctrl+A / Del / ESC (R-12, R-13, R-18). IK_UP / IK_DOWN / IK_LEFT /
+IK_RIGHT already exist in `igraph_key_t` and are mapped in
+`graph_raylib.c`.
+
+**Pairing.** Complements R-7 auto-align: bulk snapping for the
+common case, single-pixel nudge for the residue.
+
+**Scope.** Trivial — ~20 lines of widget code + ~10 lines of
+shortcut dispatch + tests. Landed before Stage 2 of the refinement
+plan as Stage 1.5.
+
+---
+
 ## Post-Phase-13 implementation work
 
 After the implementation plan's final stretch phase landed

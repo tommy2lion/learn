@@ -134,6 +134,13 @@ void circuit_canvas_widget_delete_selection(circuit_canvas_widget_t *self);
    ESC shortcut can reach it without the canvas needing focus. (R-18) */
 void circuit_canvas_widget_cancel_mode(circuit_canvas_widget_t *self);
 
+/* Translate every node in the selection by (dx, dy) pixels. No-op when the
+   selection is empty. Wires are reseeded so geometry follows the moved pins.
+   Bound to arrow keys in dcs_app's poll_global_shortcuts for precise
+   manual alignment (1 px per press). (R-19) */
+void circuit_canvas_widget_nudge_selection(circuit_canvas_widget_t *self,
+                                           int dx, int dy);
+
 /* Drop all wire geometry and re-route from the current circuit's connectivity.
    Called internally by the canvas's mutation paths; exposed for testing and
    for any future caller that has mutated the underlying circuit_t outside
