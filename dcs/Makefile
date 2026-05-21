@@ -300,11 +300,79 @@ $(TEST_COMMAND_STACK_EXE): src/app/command.h src/app/command_stack.h \
 test_command_stack: $(TEST_COMMAND_STACK_EXE)
 	./$(TEST_COMMAND_STACK_EXE)
 
+# ── Step 3 Stage 3 (U-5): app-layer test scaffold ──────────────────
+TEST_DIVIDER_SRC = test/test_divider_widget.c
+TEST_DIVIDER_EXE = test/test_divider_widget.exe
+
+$(TEST_DIVIDER_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                    src/app/divider_widget.c src/app/divider_widget.h \
+                    $(TEST_DIVIDER_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		src/app/divider_widget.c $(TEST_DIVIDER_SRC) -o $@
+
+test_divider_widget: $(TEST_DIVIDER_EXE)
+	./$(TEST_DIVIDER_EXE)
+
+TEST_INPUT_PANEL_SRC = test/test_input_panel.c
+TEST_INPUT_PANEL_EXE = test/test_input_panel.exe
+
+$(TEST_INPUT_PANEL_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                        $(DOMAIN_SRC) $(DOMAIN_HDR) \
+                        src/app/input_panel.c src/app/input_panel.h \
+                        $(TEST_INPUT_PANEL_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(DOMAIN_SRC) src/app/input_panel.c $(TEST_INPUT_PANEL_SRC) -o $@
+
+test_input_panel: $(TEST_INPUT_PANEL_EXE)
+	./$(TEST_INPUT_PANEL_EXE)
+
+TEST_SIDE_TOOLBAR_SRC = test/test_side_toolbar.c
+TEST_SIDE_TOOLBAR_EXE = test/test_side_toolbar.exe
+
+# side_toolbar tests instantiate a real circuit_canvas_widget — pull
+# in the same APP_SRC + DOMAIN_SRC + FW_WIDGET_SRC mix the canvas
+# supplement tests use, minus dcs_app + timing_canvas (not exercised
+# here).
+$(TEST_SIDE_TOOLBAR_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                         $(DOMAIN_SRC) $(DOMAIN_HDR) \
+                         src/app/circuit_canvas_widget.c src/app/circuit_canvas_widget.h \
+                         src/app/side_toolbar.c src/app/side_toolbar.h \
+                         src/app/external_view.c src/app/external_view.h \
+                         src/app/editor_state.h \
+                         $(TEST_SIDE_TOOLBAR_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(DOMAIN_SRC) src/app/circuit_canvas_widget.c \
+		src/app/side_toolbar.c src/app/external_view.c \
+		$(TEST_SIDE_TOOLBAR_SRC) -o $@
+
+test_side_toolbar: $(TEST_SIDE_TOOLBAR_EXE)
+	./$(TEST_SIDE_TOOLBAR_EXE)
+
+TEST_DCS_APP_SRC = test/test_dcs_app.c
+TEST_DCS_APP_EXE = test/test_dcs_app.exe
+
+# dcs_app's init wires up the whole app — needs every framework +
+# domain + app source, same as the GUI build. Pull in everything
+# except the raylib backend (we use a stub igraph in the test).
+$(TEST_DCS_APP_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_HDR) $(FW_PLATFORM_HDR) \
+                    $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) \
+                    $(DOMAIN_SRC) $(DOMAIN_HDR) $(APP_SRC) $(APP_HDR) \
+                    $(BUILD_INFO_SRC) $(BUILD_INFO_HDR) \
+                    $(SHA256_SRC) $(SHA256_HDR) \
+                    $(TEST_DCS_APP_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		$(FW_PLATFORM_SRC) $(FW_WIDGET_SRC) \
+		$(DOMAIN_SRC) $(APP_SRC) $(BUILD_INFO_SRC) $(SHA256_SRC) \
+		$(TEST_DCS_APP_SRC) -o $@ -lcomdlg32
+
+test_dcs_app: $(TEST_DCS_APP_EXE)
+	./$(TEST_DCS_APP_EXE)
+
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
