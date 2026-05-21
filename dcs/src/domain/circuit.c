@@ -94,6 +94,29 @@ int circuit_add_component(circuit_t *self, component_t *c,
     return 0;
 }
 
+int circuit_add_orphan_component(circuit_t *self, component_t *c) {
+    if (!c) return -1;
+    if (find_wire(self, c->name)) return -1;
+    if (!push_wire(self, c->name)) return -1;     /* push_wire grows on overflow */
+    if (self->component_count >= self->component_cap) {
+        int nc = self->component_cap * 2;
+        component_t **nn =
+            (component_t **)realloc(self->components, nc * sizeof(component_t *));
+        if (!nn) {
+            /* Roll back the wire we just created so state is unchanged
+               on failure (CLAUDE.md §9.3 atomicity). */
+            self->wire_count--;
+            return -1;
+        }
+        self->components    = nn;
+        self->component_cap = nc;
+    }
+    /* in_wires stay empty — the caller (canvas placement) wires them up
+       later via connect_wire. */
+    self->components[self->component_count++] = c;
+    return 0;
+}
+
 void circuit_set_input(circuit_t *self, const char *name, signal_t v) {
     wire_t *w = find_wire(self, name);
     if (w) w->value = v;

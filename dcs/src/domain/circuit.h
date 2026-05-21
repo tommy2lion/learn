@@ -42,6 +42,16 @@ int circuit_add_output(circuit_t *self, const char *name);
 int circuit_add_component(circuit_t *self, component_t *c,
                           const char *in1, const char *in2);
 
+/* Add a freshly-instantiated component that has NO input connections yet.
+   Creates the output wire named after the component. Both the components
+   array and the wires array grow on demand (capped only by malloc). Used
+   by the GUI canvas when the user places a new gate — the user wires its
+   inputs up in a separate step. Returns 0 on success, -1 if the component
+   is NULL, the output name is a duplicate, or allocation fails. Takes
+   ownership on success. (Bugfix for canvas-place silently failing at the
+   wire-cap boundary.) */
+int circuit_add_orphan_component(circuit_t *self, component_t *c);
+
 /* Wire I/O. */
 void     circuit_set_input  (circuit_t *self, const char *name, signal_t v);
 signal_t circuit_get_wire   (const circuit_t *self, const char *name);

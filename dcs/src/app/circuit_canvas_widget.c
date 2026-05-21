@@ -639,26 +639,18 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
         default: return;
     }
     if (!comp) return;
-    /* For new components, leave in_wires empty; components added without input
-       wires won't pass circuit_add_component's validation. So we use a back-door:
-       directly add to the components array and create the output wire. */
-    /* simpler path: don't go through circuit_add_component for new placements
-       since they have no inputs yet; manually push */
-    if (cw->circuit->component_count < cw->circuit->component_cap) {
-        comp->position = world;
-        /* We need the output wire to exist so other components can connect to it.
-           Manually push the wire then the component. */
-        if (cw->circuit->wire_count < cw->circuit->wire_cap) {
-            wire_t *w = &cw->circuit->wires[cw->circuit->wire_count++];
-            snprintf(w->name, DOMAIN_NAME_LEN, "%s", comp->name);
-            w->value = SIG_UNDEF;
-            cw->circuit->components[cw->circuit->component_count++] = comp;
-            status(cw, "Placed %s", comp->name);
-            notify_mutated(cw);
-            return;
-        }
+    comp->position = world;
+    /* circuit_add_orphan_component creates the output wire and grows
+       both the wires and components arrays on demand — replaces the
+       earlier "manual push" path that silently failed when wire_count
+       == wire_cap (reproduced by my_test.dcs: 3 inputs + 5 gates = 8
+       wires, hitting the initial cap of 8 on first new placement). */
+    if (circuit_add_orphan_component(cw->circuit, comp) == 0) {
+        status(cw, "Placed %s", comp->name);
+        notify_mutated(cw);
+    } else {
+        component_destroy(comp);
     }
-    component_destroy(comp);
 }
 
 /* Disconnect input pin `pin` of component `idx` (clear its in_wires entry).

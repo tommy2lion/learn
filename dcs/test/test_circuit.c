@@ -172,6 +172,38 @@ static void test_component_metadata(void) {
     component_destroy(n);
 }
 
+/* Regression for the canvas-placement bug surfaced by circuits/my_test.dcs:
+   when wire_count == wire_cap at placement time, the old place_at path
+   silently dropped the new gate. circuit_add_orphan_component is the new
+   fix funnel — must grow both arrays on demand. */
+static void test_add_orphan_component_grows_caps(void) {
+    circuit_t *c = circuit_create();
+    /* INIT_CAP is 8; fill the wires array via 8 inputs so wire_count
+       hits wire_cap exactly. */
+    for (int i = 0; i < 8; i++) {
+        char nm[8];
+        snprintf(nm, sizeof(nm), "in%d", i);
+        check("setup: add input within initial cap",
+              circuit_add_input(c, nm) == 0);
+    }
+    /* One more orphan component must trigger an array grow rather
+       than silently failing. */
+    component_t *g = gate_and_create("g1");
+    int rc = circuit_add_orphan_component(c, g);
+    check("orphan add at cap: returns 0",                rc == 0);
+    check("orphan add: component appears in array",      c->component_count == 1);
+    check("orphan add: wire array grew (count == 9)",    c->wire_count == 9);
+    /* Duplicate name must be rejected (no leak — caller frees). */
+    component_t *dupe = gate_and_create("g1");
+    check("orphan add: duplicate output name -> -1",
+          circuit_add_orphan_component(c, dupe) == -1);
+    component_destroy(dupe);
+    /* NULL component is a no-op error. */
+    check("orphan add NULL -> -1",
+          circuit_add_orphan_component(c, NULL) == -1);
+    circuit_destroy(c);
+}
+
 int main(void) {
     printf("=== domain: circuit / component tests ===\n");
     test_and_gate();
@@ -182,6 +214,7 @@ int main(void) {
     test_undefined_signal();
     test_add_component_errors();
     test_component_metadata();
+    test_add_orphan_component_grows_caps();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }
