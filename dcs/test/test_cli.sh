@@ -132,6 +132,25 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# 13. R-15: --version exits 0 and prints "DCS <semver>"
+out=$($EXE --version | tr -d '\r')
+if echo "$out" | grep -Eq '^DCS [0-9]+\.[0-9]+\.[0-9]+'; then
+    printf "PASS  --version: matches 'DCS X.Y.Z' shape\n"
+    PASS=$((PASS + 1))
+else
+    printf "FAIL  --version: unexpected output: %s\n" "$out"
+    FAIL=$((FAIL + 1))
+fi
+
+# 14. R-15: --version exits 0
+if $EXE --version > /dev/null 2>&1; then
+    printf "PASS  --version exits 0\n"
+    PASS=$((PASS + 1))
+else
+    printf "FAIL  --version should exit 0\n"
+    FAIL=$((FAIL + 1))
+fi
+
 echo
 printf "%d passed, %d failed\n" "$PASS" "$FAIL"
 exit $FAIL

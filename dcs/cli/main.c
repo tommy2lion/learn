@@ -11,6 +11,7 @@
 #include "../src/domain/component.h"
 #include "../src/domain/circuit.h"
 #include "../src/domain/circuit_io.h"
+#include "../src/version.h"
 
 #define MAX_INPUT_SPECS 16
 #define MAX_STEPS       64
@@ -107,9 +108,19 @@ static void print_usage(FILE *out) {
         "usage: dcs_cli <file.dcs> [--input \"name=v[,v...]\"]...\n"
         "       dcs_cli --help | -h           # brief usage\n"
         "       dcs_cli --help-format         # full .dcs file format reference\n"
+        "       dcs_cli --version             # print version and exit\n"
         "\n"
         "  --input name=v,v,v   set input 'name' to a series of step values\n"
         "  --input n1=v,n2=v    set multiple inputs at once (one step each)\n");
+}
+
+/* --version output. Today this is just the static project version from
+   src/version.h. Stage 7b will append `:<build-date>:<git-short>` and
+   Stage 7c will append a tamper signature, so downstream parsers should
+   treat colon-delimited fields after the version as forward-compatible
+   metadata. (R-15 part 1) */
+static void print_version(FILE *out) {
+    fprintf(out, "DCS %s\n", DCS_VERSION_STR);
 }
 
 /* --help-format prints a self-contained reference that an AI assistant
@@ -289,9 +300,9 @@ static void print_format_help(FILE *out) {
 /* ── main ─────────────────────────────────────────────────────────── */
 
 int main(int argc, char **argv) {
-    /* Help flags come first — handled before the positional-arg check so
-       they work with zero args. Standard Unix convention: writes to stdout
-       and exits 0. */
+    /* Help / version flags come first — handled before the positional-arg
+       check so they work with zero args. Standard Unix convention: writes
+       to stdout and exits 0. */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(stdout);
@@ -299,6 +310,10 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--help-format") == 0) {
             print_format_help(stdout);
+            return 0;
+        }
+        if (strcmp(argv[i], "--version") == 0) {
+            print_version(stdout);
             return 0;
         }
     }
