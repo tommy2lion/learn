@@ -1,0 +1,8 @@
+inputs: a, b
+outputs: y
+
+not_a       = not(a)
+not_b       = not(b)
+a_and_not_b = and(a, not_b)
+not_a_and_b = and(not_a, b)
+y           = or(a_and_not_b, not_a_and_b)

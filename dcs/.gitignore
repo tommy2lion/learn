@@ -24,3 +24,5 @@ src/build_info.c
 # build.sh mode-tracking sentinel — tells the script whether the last
 # build was release or debug, so a mode switch can force -B.
 .build_mode
+
+docs/*

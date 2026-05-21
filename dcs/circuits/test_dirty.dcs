@@ -1,0 +1,9 @@
+inputs:
+outputs:
+
+g1 = and(, )
+g2 = not()
+
+# @layout
+# @  g1 = -346, -126
+# @  g2 = -320, 9

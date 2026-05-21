@@ -1,0 +1,5 @@
+inputs: a, b
+outputs: y
+
+or_out = or(a, b)
+y      = not(or_out)

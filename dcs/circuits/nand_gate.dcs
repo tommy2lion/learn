@@ -1,0 +1,5 @@
+inputs: a, b
+outputs: y
+
+and_out = and(a, b)
+y       = not(and_out)
