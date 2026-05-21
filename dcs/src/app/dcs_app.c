@@ -312,6 +312,11 @@ static void on_view_menu_select(int idx, void *user) {
     if (idx == 0) action_toggle_display_mode(app);
 }
 
+static void on_help_menu_select(int idx, void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    if (idx == 0) help_dialog_show(app->help_dialog);
+}
+
 /* ── run / sweep ─────────────────────────────────────────────────── */
 
 typedef struct tagt_stim_ctx { dcs_app_t *app; int sweep; } stim_ctx_t;
@@ -359,6 +364,16 @@ static void poll_global_shortcuts(dcs_app_t *app) {
     igraph_t *g = app->graph;
     int ctrl  = g->key_down(g->self, IK_LEFT_CTRL)  || g->key_down(g->self, IK_RIGHT_CTRL);
     int shift = g->key_down(g->self, IK_LEFT_SHIFT) || g->key_down(g->self, IK_RIGHT_SHIFT);
+    /* Help dialog is modal — when open, only F1 / ESC close it; everything
+       else is swallowed so the underlying canvas / menus stay inert (R-14). */
+    if (help_dialog_is_visible(app->help_dialog)) {
+        if (g->key_pressed(g->self, IK_F1) || g->key_pressed(g->self, IK_ESCAPE))
+            help_dialog_hide(app->help_dialog);
+        return;
+    }
+    /* F1 opens the help dialog. */
+    if (!ctrl && g->key_pressed(g->self, IK_F1))
+        help_dialog_show(app->help_dialog);
     if (ctrl && g->key_pressed(g->self, IK_N)) action_new(app);
     if (ctrl && g->key_pressed(g->self, IK_O)) action_open(app);
     if (ctrl && g->key_pressed(g->self, IK_S)) {
@@ -456,6 +471,11 @@ static void relayout(dcs_app_t *app, int sw, int sh) {
         if (sw_max < SIDEBAR_W_MIN) sw_max = SIDEBAR_W_MIN;
         divider_widget_set_range(app->div_v, SIDEBAR_W_MIN, sw_max);
     }
+    /* Help dialog (R-14) is the modal overlay — bounds always equal the
+       entire window so its centred box stays centred on resize. */
+    if (app->help_dialog) {
+        help_dialog_set_bounds(app->help_dialog, (rect_t){0, 0, sw, sh});
+    }
 }
 
 /* Divider drag callbacks. The divider reports the new mouse coordinate;
@@ -529,6 +549,15 @@ static void build_widgets(dcs_app_t *app) {
     menu_add_item(app->view_menu, "Toggle black-box view", "Ctrl+B");
     menu_set_on_select(app->view_menu, on_view_menu_select, app);
 
+    /* Help menu — R-14. Sits to the right of View. */
+    app->help_menu = menu_create((rect_t){176, 4, 80, 22}, "Help");
+    menu_add_item(app->help_menu, "Show keyboard reference", "F1");
+    menu_set_on_select(app->help_menu, on_help_menu_select, app);
+
+    /* Help dialog — full-screen modal layer. Added LAST so it sits on top
+       in dispatch and draw order. Starts hidden. */
+    app->help_dialog = help_dialog_create((rect_t){0, 0, sw, sh});
+
     /* Status label */
     app->status_label = label_create((rect_t){0, sh - STATUS_H, sw, STATUS_H},
                                      "", 14, 0xC8C8C8FFu);
@@ -551,6 +580,10 @@ static void build_widgets(dcs_app_t *app) {
     panel_add_child(app->root, &app->status_label->base);
     panel_add_child(app->root, &app->file_menu->base);
     panel_add_child(app->root, &app->view_menu->base);
+    panel_add_child(app->root, &app->help_menu->base);
+    /* Modal layer LAST so it's the topmost child (depth-first dispatch
+       tries last-child first, draws last). */
+    panel_add_child(app->root, &app->help_dialog->base);
 
     relayout(app, sw, sh);   /* sets divider bounds + ranges */
 }

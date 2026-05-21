@@ -19,6 +19,7 @@ typedef enum {
     IK_LEFT_CTRL, IK_RIGHT_CTRL,
     IK_LEFT_SHIFT, IK_RIGHT_SHIFT,
     IK_UP, IK_DOWN, IK_LEFT, IK_RIGHT,
+    IK_F1,                                       /* help dialog toggle (R-14) */
     IK__COUNT
 } igraph_key_t;
 

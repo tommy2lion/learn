@@ -42,6 +42,7 @@ static int rl_key(igraph_key_t ik) {
         case IK_DOWN:        return KEY_DOWN;
         case IK_LEFT:        return KEY_LEFT;
         case IK_RIGHT:       return KEY_RIGHT;
+        case IK_F1:          return KEY_F1;
         default:             return 0;
     }
 }

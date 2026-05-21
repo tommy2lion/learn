@@ -556,7 +556,7 @@ event handler. The deletion machinery already exists (Phase 4).
 
 ---
 
-## R-14 — Help menu + `F1` help dialog ⏸
+## R-14 — Help menu + `F1` help dialog ✅
 
 **Observation.** Mouse and keyboard shortcuts aren't discoverable.
 New users have to read the source.

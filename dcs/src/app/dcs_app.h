@@ -13,6 +13,7 @@
 #include "side_toolbar.h"
 #include "input_panel.h"
 #include "divider_widget.h"
+#include "help_dialog.h"
 #include "../domain/circuit.h"
 #include "../domain/simulation.h"
 
@@ -36,6 +37,8 @@ class tagt_dcs_app {
     input_panel_t           *input_panel;
     menu_t                  *file_menu;
     menu_t                  *view_menu;     /* Phase 8 — black-box toggle, etc. */
+    menu_t                  *help_menu;     /* R-14 — Show help (F1)            */
+    help_dialog_t           *help_dialog;   /* R-14 — modal keyboard reference   */
     label_t                 *status_label;
     divider_widget_t        *div_h;        /* between canvas + bottom panel */
     divider_widget_t        *div_v;        /* between sidebar + canvas      */

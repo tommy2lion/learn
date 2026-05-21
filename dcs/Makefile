@@ -29,6 +29,7 @@ APP_SRC = src/app/circuit_canvas_widget.c \
           src/app/input_panel.c \
           src/app/divider_widget.c \
           src/app/external_view.c \
+          src/app/help_dialog.c \
           src/app/dcs_app.c
 APP_HDR = src/app/editor_state.h \
           src/app/circuit_canvas_widget.h \
@@ -37,6 +38,7 @@ APP_HDR = src/app/editor_state.h \
           src/app/input_panel.h \
           src/app/divider_widget.h \
           src/app/external_view.h \
+          src/app/help_dialog.h \
           src/app/dcs_app.h
 
 GUI_SRC = src/gui/main.c
@@ -203,11 +205,24 @@ $(TEST_CCW_SUP_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
 test_circuit_canvas_supplement: $(TEST_CCW_SUP_EXE)
 	./$(TEST_CCW_SUP_EXE)
 
+# ── R-14 help_dialog widget tests ──────────────────────────────────
+TEST_HELP_DIALOG_SRC = test/test_help_dialog.c
+TEST_HELP_DIALOG_EXE = test/test_help_dialog.exe
+
+$(TEST_HELP_DIALOG_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                         src/app/help_dialog.c src/app/help_dialog.h \
+                         $(TEST_HELP_DIALOG_SRC)
+	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
+		src/app/help_dialog.c $(TEST_HELP_DIALOG_SRC) -o $@
+
+test_help_dialog: $(TEST_HELP_DIALOG_EXE)
+	./$(TEST_HELP_DIALOG_EXE)
+
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
