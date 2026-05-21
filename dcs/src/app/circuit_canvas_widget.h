@@ -128,6 +128,12 @@ void circuit_canvas_widget_select_all(circuit_canvas_widget_t *self);
    unused. (R-13) */
 void circuit_canvas_widget_delete_selection(circuit_canvas_widget_t *self);
 
+/* Cancel whatever mode the canvas is in and clear the selection. Superset
+   of the two now-dead in-widget ESC handlers (CMODE_IDLE + CMODE_WIRE_EDIT)
+   — resets every transient mode flag in one go. Public so dcs_app's global
+   ESC shortcut can reach it without the canvas needing focus. (R-18) */
+void circuit_canvas_widget_cancel_mode(circuit_canvas_widget_t *self);
+
 /* Drop all wire geometry and re-route from the current circuit's connectivity.
    Called internally by the canvas's mutation paths; exposed for testing and
    for any future caller that has mutated the underlying circuit_t outside

@@ -749,7 +749,9 @@ int main(void) {
         circuit_destroy(c);
     }
 
-    /* ── ESC during WIRE_EDIT cancels back to IDLE ────────────────── */
+    /* ── cancel_mode during WIRE_EDIT returns to IDLE + clears we_* ──
+       (Was an ESC-via-widget_handle_event test before R-18; the in-widget
+       ESC handler is now routed globally so we call cancel_mode directly.) */
     {
         circuit_t *c = make_simple_circuit();
         circuit_canvas_widget_t *cw =
@@ -774,13 +776,13 @@ int main(void) {
         check("press enters WIRE_EDIT (setup)",
               cw->mode == CMODE_WIRE_EDIT);
 
-        event_t esc;
-        memset(&esc, 0, sizeof(esc));
-        esc.kind    = EV_KEY_PRESS;
-        esc.key.key = IK_ESCAPE;
-        widget_handle_event(&cw->base, &esc);
-        check("ESC during WIRE_EDIT: mode back to IDLE",
+        circuit_canvas_widget_cancel_mode(cw);
+        check("cancel_mode during WIRE_EDIT: mode back to IDLE",
               cw->mode == CMODE_IDLE);
+        check("cancel_mode during WIRE_EDIT: we_net_idx reset",
+              cw->we_net_idx == -1);
+        check("cancel_mode during WIRE_EDIT: we_seg_idx reset",
+              cw->we_seg_idx == -1);
 
         widget_destroy(&cw->base);
         circuit_destroy(c);
@@ -1307,6 +1309,38 @@ int main(void) {
     {
         circuit_canvas_widget_delete_selection(NULL);
         check("delete_selection(NULL) is safe", 1);
+    }
+
+    /* ── R-18: cancel_mode resets every transient mode field ─────── */
+    {
+        circuit_t *c = make_simple_circuit();
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
+        /* Manually arm every mode-related field to non-default values. */
+        cw->mode       = CMODE_PLACING;
+        cw->place_kind = PLACE_AND;
+        cw->wire_src   = (node_ref_t){NODE_COMPONENT, 0};
+        cw->drag_node  = (node_ref_t){NODE_INPUT, 0};
+        cw->we_net_idx = 5;
+        cw->we_seg_idx = 7;
+        circuit_canvas_widget_select_all(cw);   /* fills selection */
+
+        circuit_canvas_widget_cancel_mode(cw);
+        check("cancel_mode: mode reset to IDLE",     cw->mode       == CMODE_IDLE);
+        check("cancel_mode: place_kind cleared",     cw->place_kind == PLACE_NONE);
+        check("cancel_mode: wire_src cleared",       cw->wire_src.kind  == NODE_NONE);
+        check("cancel_mode: drag_node cleared",      cw->drag_node.kind == NODE_NONE);
+        check("cancel_mode: we_net_idx == -1",       cw->we_net_idx == -1);
+        check("cancel_mode: we_seg_idx == -1",       cw->we_seg_idx == -1);
+        check("cancel_mode: selection cleared",      cw->selection_count == 0);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── R-18: cancel_mode(NULL) is a no-op ──────────────────────── */
+    {
+        circuit_canvas_widget_cancel_mode(NULL);
+        check("cancel_mode(NULL) is safe", 1);
     }
 
     printf("\n%d / %d passed\n", total - failures, total);

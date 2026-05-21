@@ -1243,20 +1243,10 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
         return 1;
     }
 
-    /* keys: ESC cancels current mode + clears selection. (Del delete-selection
-       and Ctrl+A select-all are handled globally by dcs_app's
-       poll_global_shortcuts because the framework's focused-widget key-event
-       dispatch is currently unused — see R-12 / R-13.) */
-    if (ev->kind == EV_KEY_PRESS) {
-        if (ev->key.key == IK_ESCAPE) {
-            cw->mode = CMODE_IDLE;
-            cw->place_kind = PLACE_NONE;
-            cw->wire_src = NODE_REF_NONE;
-            cw->drag_node = NODE_REF_NONE;
-            selection_clear(cw);
-            return 1;
-        }
-    }
+    /* All keyboard shortcuts (ESC cancel-mode, Del delete-selection, Ctrl+A
+       select-all) are handled globally by dcs_app's poll_global_shortcuts
+       because the framework's focused-widget key-event dispatch is currently
+       unused — see R-12 / R-13 / R-18. */
 
     /* Mode-specific behavior. */
     if (cw->mode == CMODE_PLACING) {
@@ -1313,15 +1303,10 @@ static int ccw_handle_event(widget_t *self, const event_t *ev) {
             assert_geometry_consistent(cw);
             return 1;
         }
-        /* ESC / right-click cancels — original geometry isn't restored
-           since incremental shifts have already mutated; the user can
-           drag back to a similar shape. */
-        if (ev->kind == EV_KEY_PRESS && ev->key.key == IK_ESCAPE) {
-            cw->mode = CMODE_IDLE;
-            cw->we_net_idx = -1;
-            cw->we_seg_idx = -1;
-            return 1;
-        }
+        /* ESC cancels via the global poll_global_shortcuts -> cancel_mode
+           path (R-18); right-click also cancels — original geometry isn't
+           restored since incremental shifts have already mutated; the
+           user can drag back to a similar shape. */
         if (ev->kind == EV_MOUSE_PRESS && ev->mouse.btn == IM_RIGHT) {
             cw->mode = CMODE_IDLE;
             cw->we_net_idx = -1;
@@ -1550,6 +1535,17 @@ void circuit_canvas_widget_delete_selection(circuit_canvas_widget_t *self) {
     if (n <= 0) return;
     remove_selection(self);
     status(self, "Deleted %d node%s", n, n == 1 ? "" : "s");
+}
+
+void circuit_canvas_widget_cancel_mode(circuit_canvas_widget_t *self) {
+    if (!self) return;
+    self->mode       = CMODE_IDLE;
+    self->place_kind = PLACE_NONE;
+    self->wire_src   = NODE_REF_NONE;
+    self->drag_node  = NODE_REF_NONE;
+    self->we_net_idx = -1;
+    self->we_seg_idx = -1;
+    selection_clear(self);
 }
 
 void circuit_canvas_widget_set_highlight(circuit_canvas_widget_t *self,
