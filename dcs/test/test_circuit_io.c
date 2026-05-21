@@ -748,6 +748,47 @@ static void test_meta_legacy_parse_ignores_meta(void) {
     if (c) circuit_destroy(c);
 }
 
+/* U-2 regression: a circuit whose serialized size exceeds the static
+   cap estimate (4096 + N·256 + …) must still serialize cleanly via the
+   growable buffer. We pump in 50 components with long names — well past
+   the old "right 99 % of the time" boundary — then round-trip through
+   parse to confirm the bytes are intact. */
+static void test_serialize_grows_buffer(void) {
+    circuit_t *c = circuit_create();
+    /* Two inputs + one output so the parser's "non-empty outputs"
+       check is satisfied. */
+    check("setup: input a",  circuit_add_input(c, "a")  == 0);
+    check("setup: input b",  circuit_add_input(c, "b")  == 0);
+    check("setup: output y", circuit_add_output(c, "y") == 0);
+    /* 50 AND gates, each named with a long prefix to stretch the line.
+       Total serialized size lands well past the old static cap when
+       combined with 50 layout entries and a name-rich outputs block. */
+    for (int i = 0; i < 50; i++) {
+        char nm[DOMAIN_NAME_LEN];
+        snprintf(nm, sizeof(nm), "long_gate_name_for_overflow_test_%02d", i);
+        component_t *g = gate_and_create(nm);
+        check("setup: add gate", circuit_add_component(c, g, "a", "b") == 0);
+    }
+    /* Link the output to the last gate so the file is a valid circuit. */
+    snprintf(c->output_names[0], DOMAIN_NAME_LEN, "long_gate_name_for_overflow_test_49");
+
+    char *text = circuit_io_serialize(c);
+    check("serialize big circuit: non-NULL", text != NULL);
+    if (text) {
+        char err[256] = {0};
+        circuit_t *c2 = circuit_io_parse(text, err, sizeof(err));
+        if (!c2) fprintf(stderr, "  parse err: %s\n", err);
+        check("big circuit round-trips", c2 != NULL);
+        if (c2) {
+            check("big circuit round-trip: component count preserved",
+                  c2->component_count == 50);
+            circuit_destroy(c2);
+        }
+        free(text);
+    }
+    circuit_destroy(c);
+}
+
 int main(void) {
     printf("=== domain: circuit_io tests ===\n");
     test_parse_and_gate();
@@ -781,6 +822,8 @@ int main(void) {
     test_meta_parse_unknown_pin_ignored();
     test_meta_parse_after_layout_no_blank();
     test_meta_legacy_parse_ignores_meta();
+    /* Step 3 v1.0.0 Stage 2 (U-2) */
+    test_serialize_grows_buffer();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

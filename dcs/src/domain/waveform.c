@@ -44,12 +44,19 @@ int waveform_add_track(waveform_t *self, const char *name) {
 }
 
 void waveform_set_value(waveform_t *self, int track_idx, int step, signal_t v) {
+    /* Defensive NULL guards (U-3): the existing step_count check below
+       catches all current call paths, but a future caller passing a
+       freshly-init'd waveform_t* could land here before add_track or
+       with self == NULL. */
+    if (!self || !self->tracks) return;
     if (track_idx < 0 || track_idx >= self->track_count) return;
     if (step < 0 || step >= self->step_count) return;
+    if (!self->tracks[track_idx].values) return;   /* invariant: only when step_count == 0 */
     self->tracks[track_idx].values[step] = v;
 }
 
 const waveform_track_t *waveform_get_track(const waveform_t *self, int idx) {
+    if (!self || !self->tracks) return NULL;
     if (idx < 0 || idx >= self->track_count) return NULL;
     return &self->tracks[idx];
 }

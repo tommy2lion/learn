@@ -7,6 +7,38 @@
 
 #define MAX_LINE 512
 
+/* ── growable serialize buffer (U-2) ─────────────────────────────────
+   Append printf-style text to a growable buffer, doubling on demand
+   when the formatted result wouldn't fit. The earlier serializer
+   relied on a static cap estimate (4096 + N·256 + …) that would
+   truncate silently on outliers (long names + many components).
+
+   On allocation failure the buffer is left UN-EXTENDED — the caller
+   typically jumps to a fail label that frees and returns NULL. */
+static int append_fmt(char **buf, int *cap, int *pos,
+                      const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int need = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (need < 0) return -1;
+    int needed = *pos + need + 1;     /* +1 for the NUL terminator */
+    if (needed > *cap) {
+        int new_cap = *cap > 0 ? *cap : 64;
+        while (new_cap < needed) new_cap *= 2;
+        char *nb = (char *)realloc(*buf, new_cap);
+        if (!nb) return -1;
+        *buf = nb;
+        *cap = new_cap;
+    }
+    va_start(ap, fmt);
+    int wrote = vsnprintf(*buf + *pos, *cap - *pos, fmt, ap);
+    va_end(ap);
+    if (wrote < 0) return -1;
+    *pos += wrote;
+    return 0;
+}
+
 /* ── string helpers ──────────────────────────────────────────────── */
 
 static void str_trim(char *s) {
@@ -504,16 +536,20 @@ static int has_any_meta(const circuit_t *c, const circuit_meta_t *meta) {
 char *circuit_io_serialize_ex(const circuit_t *c,
                               const wire_geometry_t *geom,
                               const circuit_meta_t  *meta) {
-    /* Estimate extra capacity for the optional # @wires block. */
+    /* Initial capacity is an estimate; append_fmt grows the buffer on
+       demand if a long name / many components / many wire segments push
+       past it. The estimate stays the same as before this change — it's
+       right ~99% of the time, and the grow path only fires for outliers.
+       (U-2 — previously this was a static cap with silent-truncation
+       risk on overflow.) */
     int wires_extra = 0;
     if (has_any_wires(geom)) {
-        wires_extra += 32;     /* "\n# @wires\n" header */
+        wires_extra += 32;
         for (int i = 0; i < geom->net_count; i++) {
             wires_extra += 96;
             wires_extra += geom->nets[i].seg_count * 72;
         }
     }
-    /* Loose upper bound for the metadata annotations. */
     int meta_extra = has_any_meta(c, meta)
                    ? 64 + DOMAIN_NAME_LEN + 96 * (c->input_count + c->output_count)
                    : 0;
@@ -524,48 +560,44 @@ char *circuit_io_serialize_ex(const circuit_t *c,
     if (!buf) return NULL;
     int pos = 0;
 
-    pos += snprintf(buf + pos, cap - pos, "inputs:");
-    for (int i = 0; i < c->input_count; i++)
-        pos += snprintf(buf + pos, cap - pos, "%s%s",
-                        i == 0 ? " " : ", ", c->input_names[i]);
-    pos += snprintf(buf + pos, cap - pos, "\n");
+#define APP(...) do { if (append_fmt(&buf, &cap, &pos, __VA_ARGS__) < 0) goto fail; } while (0)
 
-    pos += snprintf(buf + pos, cap - pos, "outputs:");
+    APP("inputs:");
+    for (int i = 0; i < c->input_count; i++)
+        APP("%s%s", i == 0 ? " " : ", ", c->input_names[i]);
+    APP("\n");
+
+    APP("outputs:");
     for (int i = 0; i < c->output_count; i++)
-        pos += snprintf(buf + pos, cap - pos, "%s%s",
-                        i == 0 ? " " : ", ", c->output_names[i]);
-    pos += snprintf(buf + pos, cap - pos, "\n\n");
+        APP("%s%s", i == 0 ? " " : ", ", c->output_names[i]);
+    APP("\n\n");
 
     for (int i = 0; i < c->component_count; i++) {
         const component_t *comp = c->components[i];
         const char *kn = component_kind_name(component_kind(comp));
         if (component_pin_count_in(comp) == 1)
-            pos += snprintf(buf + pos, cap - pos, "%s = %s(%s)\n",
-                            comp->name, kn, comp->in_wires[0]);
+            APP("%s = %s(%s)\n", comp->name, kn, comp->in_wires[0]);
         else
-            pos += snprintf(buf + pos, cap - pos, "%s = %s(%s, %s)\n",
-                            comp->name, kn, comp->in_wires[0], comp->in_wires[1]);
+            APP("%s = %s(%s, %s)\n",
+                comp->name, kn, comp->in_wires[0], comp->in_wires[1]);
     }
 
     /* Optional layout-annotation block (Phase 2.6). Skipped when every
        position is zero — preserves the prototype's compact format for
        freshly-built circuits and keeps round-trips stable. */
     if (has_layout_data(c)) {
-        pos += snprintf(buf + pos, cap - pos, "\n# @layout\n");
+        APP("\n# @layout\n");
         for (int i = 0; i < c->component_count; i++) {
             vec2_t p = c->components[i]->position;
-            pos += snprintf(buf + pos, cap - pos, "# @  %s = %g, %g\n",
-                            c->components[i]->name, p.x, p.y);
+            APP("# @  %s = %g, %g\n", c->components[i]->name, p.x, p.y);
         }
         for (int i = 0; i < c->input_count; i++) {
             vec2_t p = c->input_positions[i];
-            pos += snprintf(buf + pos, cap - pos, "# @  __input:%s = %g, %g\n",
-                            c->input_names[i], p.x, p.y);
+            APP("# @  __input:%s = %g, %g\n", c->input_names[i], p.x, p.y);
         }
         for (int i = 0; i < c->output_count; i++) {
             vec2_t p = c->output_positions[i];
-            pos += snprintf(buf + pos, cap - pos, "# @  __output:%s = %g, %g\n",
-                            c->output_names[i], p.x, p.y);
+            APP("# @  __output:%s = %g, %g\n", c->output_names[i], p.x, p.y);
         }
     }
 
@@ -573,19 +605,16 @@ char *circuit_io_serialize_ex(const circuit_t *c,
        is NULL or every net is empty — keeps the legacy single-arg serializer
        output byte-identical to what it produced before this phase landed. */
     if (has_any_wires(geom)) {
-        pos += snprintf(buf + pos, cap - pos, "\n# @wires\n");
+        APP("\n# @wires\n");
         for (int i = 0; i < geom->net_count; i++) {
             const wire_net_geom_t *n = &geom->nets[i];
             if (n->seg_count == 0) continue;
-            pos += snprintf(buf + pos, cap - pos, "# @  net=%s\n", n->wire_name);
+            APP("# @  net=%s\n", n->wire_name);
             for (int s = 0; s < n->seg_count; s++) {
                 const wire_segment_t *seg = &n->segs[s];
                 char dir = (seg->a.y == seg->b.y) ? 'h' : 'v';
-                pos += snprintf(buf + pos, cap - pos,
-                                "# @    %c %g,%g \xe2\x86\x92 %g,%g\n",
-                                dir,
-                                seg->a.x, seg->a.y,
-                                seg->b.x, seg->b.y);
+                APP("# @    %c %g,%g \xe2\x86\x92 %g,%g\n",
+                    dir, seg->a.x, seg->a.y, seg->b.x, seg->b.y);
             }
         }
     }
@@ -593,29 +622,29 @@ char *circuit_io_serialize_ex(const circuit_t *c,
     /* Optional metadata block (supplement Phase 10). Emits only the fields
        that differ from their defaults so legacy files stay clean. */
     if (has_any_meta(c, meta)) {
-        pos += snprintf(buf + pos, cap - pos, "\n");
+        APP("\n");
         if (meta->display_mode != 0) {
-            pos += snprintf(buf + pos, cap - pos,
-                            "# @display_mode = external\n");
+            APP("# @display_mode = external\n");
         }
         if (meta->display_name[0]) {
-            pos += snprintf(buf + pos, cap - pos,
-                            "# @display_name = %s\n", meta->display_name);
+            APP("# @display_name = %s\n", meta->display_name);
         }
         for (int i = 0; i < c->input_count && i < DOMAIN_MAX_IO; i++) {
             if (meta->input_styles[i] == 0) continue;
-            pos += snprintf(buf + pos, cap - pos,
-                            "# @pin_style = __input:%s : %s\n",
-                            c->input_names[i],
-                            pin_style_to_word(meta->input_styles[i]));
+            APP("# @pin_style = __input:%s : %s\n",
+                c->input_names[i], pin_style_to_word(meta->input_styles[i]));
         }
         for (int i = 0; i < c->output_count && i < DOMAIN_MAX_IO; i++) {
             if (meta->output_styles[i] == 0) continue;
-            pos += snprintf(buf + pos, cap - pos,
-                            "# @pin_style = __output:%s : %s\n",
-                            c->output_names[i],
-                            pin_style_to_word(meta->output_styles[i]));
+            APP("# @pin_style = __output:%s : %s\n",
+                c->output_names[i], pin_style_to_word(meta->output_styles[i]));
         }
     }
+
+#undef APP
     return buf;
+
+fail:
+    free(buf);
+    return NULL;
 }

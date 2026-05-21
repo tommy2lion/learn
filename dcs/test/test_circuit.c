@@ -6,6 +6,7 @@
 #include <string.h>
 #include "../src/domain/component.h"
 #include "../src/domain/circuit.h"
+#include "../src/domain/waveform.h"
 
 static int failures = 0, total = 0;
 
@@ -204,6 +205,42 @@ static void test_add_orphan_component_grows_caps(void) {
     circuit_destroy(c);
 }
 
+/* U-3 regression: waveform helpers must reject NULL / empty / out-of-
+   range inputs without crashing. The pre-fix code passed for the
+   step-out-of-range case (the existing bounds check caught it) but
+   would crash on a NULL self pointer — exercised here to lock in the
+   defensive guards. */
+static void test_waveform_null_safety(void) {
+    /* NULL self - must not crash. */
+    waveform_set_value(NULL, 0, 0, SIG_HIGH);
+    check("waveform_set_value(NULL) is safe",        1);
+    check("waveform_get_track(NULL) returns NULL",
+          waveform_get_track(NULL, 0) == NULL);
+
+    /* Freshly-init'd waveform with no tracks. */
+    waveform_t w;
+    waveform_init(&w, 4);
+    waveform_set_value(&w, 0, 0, SIG_HIGH);          /* no tracks added yet */
+    check("set_value on no-tracks is no-op",         1);
+    check("get_track on no-tracks returns NULL",
+          waveform_get_track(&w, 0) == NULL);
+
+    /* Track with step_count == 0 (values == NULL). The invariant says
+       this combination should never have a writable index — the
+       step-bounds check rejects every step >= 0. */
+    waveform_t w0;
+    waveform_init(&w0, 0);
+    int idx = waveform_add_track(&w0, "x");
+    check("add_track on step_count=0 returns 0",     idx == 0);
+    const waveform_track_t *t = waveform_get_track(&w0, 0);
+    check("get_track on step_count=0 returns track", t != NULL);
+    check("track.values is NULL when step_count=0",  t && t->values == NULL);
+    waveform_set_value(&w0, 0, 0, SIG_HIGH);         /* must not crash */
+    check("set_value on step_count=0 is no-op",      1);
+    waveform_release(&w0);
+    waveform_release(&w);
+}
+
 int main(void) {
     printf("=== domain: circuit / component tests ===\n");
     test_and_gate();
@@ -215,6 +252,8 @@ int main(void) {
     test_add_component_errors();
     test_component_metadata();
     test_add_orphan_component_grows_caps();
+    /* Step 3 v1.0.0 Stage 2 (U-3) */
+    test_waveform_null_safety();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

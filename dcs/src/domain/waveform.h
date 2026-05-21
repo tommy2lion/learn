@@ -9,7 +9,10 @@
 
 class tagt_waveform_track {
     char      name[DOMAIN_NAME_LEN];
-    signal_t *values;         /* heap-allocated, length = step_count (owned) */
+    /* Heap-allocated, length == step_count (owned by this track).
+       INVARIANT: values is non-NULL iff step_count > 0. Callers iterating
+       a track must check step_count > 0 before reading values[]. */
+    signal_t *values;
     int       step_count;
 };
 typedef class tagt_waveform_track waveform_track_t;
