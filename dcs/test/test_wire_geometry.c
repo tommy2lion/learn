@@ -1375,6 +1375,107 @@ int main(void) {
         wire_geometry_release(&g);
     }
 
+    /* ─── Stage 4B.4: channel-aware routing ──────────────────────── */
+
+    /* H stub crosses an obstacle and detours via the supplied H channel. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Producer at (0, 50). Two consumers at (300, 35) and (300, 65),
+           so the V-bus is short and EACH stub goes from V_bus_x at small
+           x to consumer.x = 300. An obstacle at x=120..200, y=20..80
+           would be crossed by both stubs (they sit at y=35 and y=65,
+           both inside the obstacle's y range).
+           A horizontal channel at y=200 (well below both stubs) is
+           available — the detour should route through it. */
+        rect_t obs = { 120, 20, 80, 60 };
+        rect_t h_ch = { -50, 195, 500, 10 };   /* y_center = 200 */
+        route_context_t ctx = {
+            .obstacles    = &obs, .n_obstacles  = 1,
+            .h_channels   = &h_ch, .n_h_channels = 1,
+        };
+        vec2_t consumers[2] = { {300, 35}, {300, 65} };
+        auto_route_net_ctx(&g, "fan", (vec2_t){0, 50}, consumers, 2, &ctx);
+        int idx = wire_geometry_find(&g, "fan");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+
+        /* Without channel detour the net would emit ~4 segments (trunk +
+           bus + 2 stubs). With the detour each crossing stub adds 2
+           extra segments. Expect significantly more total. */
+        check("channelled detour: net has > 4 segments",
+              n->seg_count > 4);
+
+        /* No segment may interior-cross the obstacle. */
+        int clean = 1;
+        for (int i = 0; i < n->seg_count; i++) {
+            const wire_segment_t *s = &n->segs[i];
+            float x_lo = s->a.x < s->b.x ? s->a.x : s->b.x;
+            float x_hi = s->a.x > s->b.x ? s->a.x : s->b.x;
+            float y_lo = s->a.y < s->b.y ? s->a.y : s->b.y;
+            float y_hi = s->a.y > s->b.y ? s->a.y : s->b.y;
+            if (x_lo < obs.x + obs.w && x_hi > obs.x &&
+                y_lo < obs.y + obs.h && y_hi > obs.y) {
+                /* Touching the edge is OK if both endpoints are AT
+                   the edge (strict interior, not touching). */
+                int strict = (x_lo < obs.x + obs.w - 0.001f) && (x_hi > obs.x + 0.001f) &&
+                             (y_lo < obs.y + obs.h - 0.001f) && (y_hi > obs.y + 0.001f);
+                if (strict) { clean = 0; break; }
+            }
+        }
+        check("channelled detour: no segment crosses obstacle interior",
+              clean);
+
+        /* Look for the tell-tale H segment in the channel (y == 200). */
+        int in_channel = 0;
+        for (int i = 0; i < n->seg_count; i++) {
+            const wire_segment_t *s = &n->segs[i];
+            if (s->a.y == s->b.y && s->a.y == 200.0f) { in_channel = 1; break; }
+        }
+        check("channelled detour: an H segment lands at the channel y=200",
+              in_channel);
+        wire_geometry_release(&g);
+    }
+
+    /* V_bus snaps to a V-channel when one is in range. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        /* Without a channel, naive V_bus_x = snap_midpoint(0, 200) = 104.
+           Supply a channel centred at x=128 (in the range [0, 200]) —
+           V_bus_x should snap there instead of 104. */
+        rect_t v_ch = { 112, -100, 32, 400 };   /* centre x = 128 */
+        route_context_t ctx = {
+            .v_channels = &v_ch, .n_v_channels = 1,
+        };
+        vec2_t consumers[2] = { {200, 20}, {200, 80} };
+        auto_route_net_ctx(&g, "fan", (vec2_t){0, 50}, consumers, 2, &ctx);
+        int idx = wire_geometry_find(&g, "fan");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        int found_at_channel = 0;
+        for (int i = 0; i < n->seg_count; i++) {
+            const wire_segment_t *s = &n->segs[i];
+            if (s->a.x == s->b.x && s->a.x == 128.0f) { found_at_channel = 1; break; }
+        }
+        check("V_bus snap-to-channel: a V segment lands at channel centre 128",
+              found_at_channel);
+        wire_geometry_release(&g);
+    }
+
+    /* Detour falls back to naive H when no channel fits. */
+    {
+        wire_geometry_t g; wire_geometry_init(&g);
+        rect_t obs = { 50, 20, 100, 100 };     /* would block the stub */
+        route_context_t ctx = {
+            .obstacles = &obs, .n_obstacles = 1,
+            /* no channels supplied */
+        };
+        vec2_t consumers[2] = { {200, 50}, {200, 90} };
+        auto_route_net_ctx(&g, "fan", (vec2_t){0, 70}, consumers, 2, &ctx);
+        int idx = wire_geometry_find(&g, "fan");
+        const wire_net_geom_t *n = wire_geometry_net(&g, idx);
+        check("no channel: net still routed (naive H fallback)",
+              n->seg_count > 0);
+        wire_geometry_release(&g);
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

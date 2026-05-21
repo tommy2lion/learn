@@ -438,6 +438,71 @@ static int v_column_hits_obstacle(float x, float y_lo, float y_hi,
     return 0;
 }
 
+/* True if the horizontal segment from (x1, y) to (x2, y) crosses
+   STRICTLY into any obstacle. Symmetric to v_column_hits_obstacle.
+   (Stage 4B.4) */
+static int h_seg_hits_obstacle(float x1, float x2, float y,
+                               const route_context_t *ctx) {
+    if (!ctx || ctx->n_obstacles == 0) return 0;
+    if (x2 < x1) { float t = x1; x1 = x2; x2 = t; }
+    for (int i = 0; i < ctx->n_obstacles; i++) {
+        const rect_t *o = &ctx->obstacles[i];
+        if (y <= o->y || y >= o->y + o->h) continue;          /* y outside */
+        if (x2 <= o->x || x1 >= o->x + o->w) continue;        /* x disjoint */
+        return 1;
+    }
+    return 0;
+}
+
+/* Sentinel "no channel found". Float NAN would also work but a fixed
+   out-of-bounds value avoids math.h and silences any FP-comparison
+   compilers might warn on. */
+#define WG_NO_CHANNEL_Y  (-1.0e30f)
+
+/* Pick the H-channel whose centre y is closest to `prefer_y` and whose
+   x-range fully covers [x_lo, x_hi]. Returns WG_NO_CHANNEL_Y if none
+   fits. (Stage 4B.4) */
+static float find_h_channel_for_stub(float x_lo, float x_hi, float prefer_y,
+                                     const route_context_t *ctx) {
+    if (!ctx || ctx->n_h_channels == 0) return WG_NO_CHANNEL_Y;
+    if (x_hi < x_lo) { float t = x_lo; x_lo = x_hi; x_hi = t; }
+    float best_y    = WG_NO_CHANNEL_Y;
+    float best_dist = 1.0e30f;
+    for (int i = 0; i < ctx->n_h_channels; i++) {
+        const rect_t *ch = &ctx->h_channels[i];
+        /* The channel must straddle the stub's x-range entirely so the
+           detour's H segment fits. Channels span the full canvas width
+           today (see compute_layout_channels), so this is usually true. */
+        if (ch->x > x_lo || ch->x + ch->w < x_hi) continue;
+        float ch_y = ch->y + ch->h * 0.5f;
+        float d    = ch_y > prefer_y ? ch_y - prefer_y : prefer_y - ch_y;
+        if (d < best_dist) { best_dist = d; best_y = ch_y; }
+    }
+    return best_y;
+}
+
+/* Snap V_bus_x to the nearest V-channel whose centre falls in the
+   [producer-side, consumer-side] range. Returns the unchanged input
+   when no channel fits — keeps the obstacle-shift fallback intact.
+   (Stage 4B.4) */
+static float snap_v_bus_to_channel(float naive_x, float prod_x, float min_cx,
+                                   const route_context_t *ctx) {
+    if (!ctx || ctx->n_v_channels == 0) return naive_x;
+    float lo = prod_x < min_cx ? prod_x : min_cx;
+    float hi = prod_x > min_cx ? prod_x : min_cx;
+    float best_x    = naive_x;
+    float best_dist = 1.0e30f;
+    int   found     = 0;
+    for (int i = 0; i < ctx->n_v_channels; i++) {
+        const rect_t *ch = &ctx->v_channels[i];
+        float ch_x = ch->x + ch->w * 0.5f;
+        if (ch_x <= lo || ch_x >= hi) continue;       /* outside producer-consumer span */
+        float d = ch_x > naive_x ? ch_x - naive_x : naive_x - ch_x;
+        if (d < best_dist) { best_dist = d; best_x = ch_x; found = 1; }
+    }
+    return found ? best_x : naive_x;
+}
+
 /* Find a V-column x that doesn't hit any obstacle, starting from the
    naive midpoint and walking outward in grid-step increments. Caps the
    search to avoid runaway; on cap reached, returns the original mid_x
@@ -667,6 +732,13 @@ int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
         V_bus_x = next;
     }
 
+    /* U-41 Stage 4B.4: snap V_bus_x to the nearest V-channel between
+       producer and the leftmost consumer when one is available. Channels
+       are obstacle-free by construction, so a channel-snap won't
+       reintroduce a crossing. Falls back to the U-40-shifted x when no
+       channel fits the range. */
+    V_bus_x = snap_v_bus_to_channel(V_bus_x, producer.x, min_cx, ctx);
+
     /* H trunk from producer to V_bus_x (skipped if zero-length). */
     if (V_bus_x != producer.x) {
         wire_segment_t h;
@@ -689,13 +761,48 @@ int auto_route_net_ctx(wire_geometry_t *self, const char *wire_name,
         wire_geometry_append_segments(self, net_idx, &v, 1);
     }
 
-    /* One H stub per consumer from (V_bus_x, c.y) to the pin. Skip
-       zero-length stubs (consumer happens to sit on the V bus). */
+    /* One stub per consumer from (V_bus_x, c.y) to the pin.
+       - Naive case: a single H segment at c.y.
+       - When that H would cross a component body (U-40 caught V columns
+         but not H rows): detour through the nearest H channel via a
+         5-vertex path V -> H -> V. The channels are guaranteed
+         obstacle-free by construction, so the detour's H segment is
+         always clean.
+       - If no channel fits, fall back to the naive H (will visibly
+         cross — at this point the layout itself is too cramped for
+         channelled routing to help; the user can drag manually).
+       Skip zero-length stubs (consumer sits on the V bus).
+       (Stage 4B.4, U-41) */
     for (int i = 0; i < eff_n; i++) {
-        if (consumers[i].x == V_bus_x) continue;
+        float cx = consumers[i].x;
+        float cy = consumers[i].y;
+        if (cx == V_bus_x) continue;
+
+        if (h_seg_hits_obstacle(V_bus_x, cx, cy, ctx)) {
+            float lo = V_bus_x < cx ? V_bus_x : cx;
+            float hi = V_bus_x > cx ? V_bus_x : cx;
+            float ch_y = find_h_channel_for_stub(lo, hi, cy, ctx);
+            if (ch_y != WG_NO_CHANNEL_Y) {
+                wire_segment_t segs[3];
+                /* V from V_bus to channel y */
+                segs[0].a.x = V_bus_x; segs[0].a.y = cy;
+                segs[0].b.x = V_bus_x; segs[0].b.y = ch_y;
+                /* H through channel */
+                segs[1].a.x = V_bus_x; segs[1].a.y = ch_y;
+                segs[1].b.x = cx;      segs[1].b.y = ch_y;
+                /* V from channel back to consumer pin y */
+                segs[2].a.x = cx;      segs[2].a.y = ch_y;
+                segs[2].b.x = cx;      segs[2].b.y = cy;
+                wire_geometry_append_segments(self, net_idx, segs, 3);
+                continue;
+            }
+            /* No channel fits the stub's x-range — fall through to
+               naive H (will cross; better than no wire). */
+        }
+
         wire_segment_t h;
-        h.a.x = V_bus_x;        h.a.y = consumers[i].y;
-        h.b.x = consumers[i].x; h.b.y = consumers[i].y;
+        h.a.x = V_bus_x; h.a.y = cy;
+        h.b.x = cx;      h.b.y = cy;
         wire_geometry_append_segments(self, net_idx, &h, 1);
     }
     return 0;
