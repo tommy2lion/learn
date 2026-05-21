@@ -30,6 +30,7 @@ APP_SRC = src/app/circuit_canvas_widget.c \
           src/app/divider_widget.c \
           src/app/external_view.c \
           src/app/help_dialog.c \
+          src/app/command_stack.c \
           src/app/dcs_app.c
 APP_HDR = src/app/editor_state.h \
           src/app/circuit_canvas_widget.h \
@@ -39,6 +40,8 @@ APP_HDR = src/app/editor_state.h \
           src/app/divider_widget.h \
           src/app/external_view.h \
           src/app/help_dialog.h \
+          src/app/command.h \
+          src/app/command_stack.h \
           src/app/dcs_app.h
 
 GUI_SRC = src/gui/main.c
@@ -286,11 +289,22 @@ $(TEST_SHA256_EXE): $(SHA256_SRC) $(SHA256_HDR) $(TEST_SHA256_SRC)
 test_sha256: $(TEST_SHA256_EXE)
 	./$(TEST_SHA256_EXE)
 
+# ── R-5 Stage 9a: command pattern + undo/redo stack ────────────────
+TEST_COMMAND_STACK_SRC = test/test_command_stack.c
+TEST_COMMAND_STACK_EXE = test/test_command_stack.exe
+
+$(TEST_COMMAND_STACK_EXE): src/app/command.h src/app/command_stack.h \
+                          src/app/command_stack.c $(TEST_COMMAND_STACK_SRC)
+	$(CC) $(CFLAGS) src/app/command_stack.c $(TEST_COMMAND_STACK_SRC) -o $@
+
+test_command_stack: $(TEST_COMMAND_STACK_EXE)
+	./$(TEST_COMMAND_STACK_EXE)
+
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
