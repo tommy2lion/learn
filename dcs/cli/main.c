@@ -12,6 +12,7 @@
 #include "../src/domain/circuit.h"
 #include "../src/domain/circuit_io.h"
 #include "../src/version.h"
+#include "../src/build_info.h"
 
 #define MAX_INPUT_SPECS 16
 #define MAX_STEPS       64
@@ -114,13 +115,13 @@ static void print_usage(FILE *out) {
         "  --input n1=v,n2=v    set multiple inputs at once (one step each)\n");
 }
 
-/* --version output. Today this is just the static project version from
-   src/version.h. Stage 7b will append `:<build-date>:<git-short>` and
-   Stage 7c will append a tamper signature, so downstream parsers should
-   treat colon-delimited fields after the version as forward-compatible
-   metadata. (R-15 part 1) */
+/* --version output: "DCS <semver>:<YYYYMMDD>:<git-short>". The trailing
+   tamper signature is added in 7c. Downstream parsers should treat
+   colon-delimited fields after the version as forward-compatible
+   metadata. (R-15 parts 1 + 2) */
 static void print_version(FILE *out) {
-    fprintf(out, "DCS %s\n", DCS_VERSION_STR);
+    fprintf(out, "DCS %s:%s:%s\n",
+            DCS_VERSION_STR, dcs_build_date, dcs_build_commit);
 }
 
 /* --help-format prints a self-contained reference that an AI assistant
