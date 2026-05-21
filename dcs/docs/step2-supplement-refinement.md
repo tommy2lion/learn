@@ -765,6 +765,63 @@ forgotten.
 
 ---
 
+## R-18 — Framework focus dispatch is dead code; decide on the model 🟡
+
+**Observation.** While debugging the Stage 1 Del-key regression
+(commit `a797909`), discovered that `focus_manager_set` is **never
+called anywhere in the codebase**. That means `focus_manager_get`
+always returns NULL, so the focused-widget keyboard-dispatch path
+in `framework/widgets/frame.c:119-129` is dead code:
+
+```c
+widget_t *focused = focus_manager_get(&self->focus);
+if (focused) {     /* always NULL */
+    for (int k = 1; k < IK__COUNT; k++) { ... widget_handle_event(focused, ...) }
+}
+```
+
+Every `EV_KEY_PRESS` branch inside a widget's `handle_event` was
+unreachable in the real GUI all along, masked only by tests that
+bypass focus via `widget_handle_event(&cw->base, &ev)` directly.
+Specifically dead before R-12/R-13/R-18 fixes:
+
+- `circuit_canvas_widget` IK_DELETE (delete selection)
+- `circuit_canvas_widget` IK_ESCAPE (cancel mode)
+- `circuit_canvas_widget` IK_ESCAPE inside CMODE_WIRE_EDIT
+
+**Interim fix (already shipped, commits `a797909` + `cea5d4b`).**
+Three new public widget functions — `circuit_canvas_widget_select_all`,
+`circuit_canvas_widget_delete_selection`,
+`circuit_canvas_widget_cancel_mode` — each dispatched globally from
+`dcs_app::poll_global_shortcuts` via the same `key_pressed` polling
+path that already powered Ctrl+N, Ctrl+S, Ctrl+B, Ctrl+= / Ctrl+-.
+Works today and matches every existing global shortcut's pattern.
+
+**Decision still pending.** Two coherent end-states:
+
+1. **Keep polling, retire focus.** Accept that all keyboard input is
+   global, delete `focus_manager` + its frame.c dispatch path,
+   simplify by ~30 lines. Trade-off: rules out future text-input
+   widgets (which need focus-scoped key delivery).
+
+2. **Wire focus up.** Implement `focus_manager_set` calls at the
+   right click/tab boundaries (canvas focuses on click; menu focuses
+   on open; explicit Tab traversal). Move global shortcuts that
+   should be focus-scoped (Del when text input has focus → edit
+   text, not delete nodes) back to per-widget handlers. Trade-off:
+   ~50-100 lines of careful focus-management logic across widget
+   tree.
+
+**Recommendation.** Defer until a text-input widget is actually
+needed (Stage 8 R-1's display-name editor is the first). At that
+point the second option becomes mandatory; until then option 1
+is the simpler model and matches what's deployed today.
+
+**Scope.** Decision is small; execution depends on which path:
+S for option 1, M for option 2.
+
+---
+
 ## Post-Phase-13 implementation work
 
 After the implementation plan's final stretch phase landed

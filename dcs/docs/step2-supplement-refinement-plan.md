@@ -356,15 +356,25 @@ distinction in the status bar.
 
 ### Stage 8b — In-GUI display-name editing
 
+**Precondition.** This is the first widget that needs *focus-scoped*
+keyboard input (a text field where Del means "delete a character",
+not "delete the canvas selection"). Resolve **R-18** (focus model
+decision) before starting this stage — likely by implementing the
+"wire focus up" path described there.
+
 **Touches.**
 - View menu — new item "Set display name…".
 - A small input-dialog widget (or simple modal text field).
 - Saves to `circuit_canvas_widget_external_meta(cw)->display_name`,
   marks dirty (Stage 2).
+- Focus management — input dialog claims focus on open; releases
+  on submit / cancel; canvas Del shortcut suppressed while dialog
+  has focus.
 
 **Done when.** User can edit the display name without leaving the
 GUI. Saving the file persists it via the existing Phase-10
-`# @display_name` annotation.
+`# @display_name` annotation. Del key while typing in the dialog
+edits the text, not the canvas selection.
 
 **Commit subject.** `Editable display name in View menu (R-1, part 2)`
 
