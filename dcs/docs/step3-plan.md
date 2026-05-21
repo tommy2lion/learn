@@ -207,4 +207,31 @@ These need answers before `step3-design.md` can be written. Suggested defaults a
 
 ---
 
+## 6. Candidate ideas — discussion only
+
+Recorded so they aren't lost. Not committed for implementation; evaluate during formal Step 3 planning.
+
+### 6.1 Ctrl+C — copy selection as image / embedded object (recorded 2026-05-21)
+
+**Idea.** When the user selects one or more components (or an entire circuit) and presses `Ctrl+C`, copy the selection to the clipboard as either:
+
+- An **embedded image** (bitmap or vector — PNG / SVG / EMF) that can be pasted into Word, PowerPoint, etc. as a picture, OR
+- An **embedded object** (OLE / drag-source) that pastes as a richer linked artefact.
+
+**Use case.** Letting the user illustrate documents, slides, or coursework with their DCS schematics without leaving the application — tighter integration with the "show this to my digital-circuits teacher" workflow.
+
+**Feasibility sketch.**
+
+| Path | Effort | Notes |
+|---|---|---|
+| Bitmap → Windows `CF_DIB` | **Low** | Render the selection's bounding box into an off-screen raylib `RenderTexture2D`, export to a CPU-side image, push via `SetClipboardData(CF_DIB, …)`. `iplatform` needs a new `set_clipboard_image(self, w, h, rgba)` method; Linux can stub or use GTK. |
+| Vector (SVG / EMF) | Medium | Higher quality; requires a serialise-from-domain path through a custom vector backend. Probably overkill for v1, follow-up if needed. |
+| OLE / embedded object | High | DCS would register a clipboard format + handler and run an OLE server. Only justified if users need round-trip "double-click in Word to re-open in DCS". |
+
+**Fallback if not implemented.** Tell users to use **PrintScreen** (or Windows + Shift + S for the snipping tool) — gives a bitmap that pastes anywhere.
+
+**When to formally evaluate.** Near R-17 (HTTP endpoint) in the priority list — both are "tighter external-workflow integration" and neither is critical for v1.
+
+---
+
 Once the open questions are settled, `step3-design.md` will fill in the concrete types, file formats, and per-phase code locations.
