@@ -38,33 +38,76 @@ static void on_canvas_status(const char *msg, void *user) {
 /* Forward decl — extract_basename's body sits a few helpers down. */
 static void extract_basename(const char *path, char *dst, int dst_len);
 
+/* Returns 1 if the canvas's display_name is set AND differs from the file's
+   basename (i.e. it overrides the basename rather than mirroring it).
+   Writes the name into `out_dn` when 1; writes "" otherwise. Safe with a
+   NULL / uninitialised canvas — returns 0. (R-1) */
+static int has_custom_display_name(const dcs_app_t *app,
+                                   char *out_dn, int out_len) {
+    if (out_len > 0) out_dn[0] = '\0';
+    if (!app->circuit_canvas) return 0;
+    external_view_metadata_t *em =
+        circuit_canvas_widget_external_meta(app->circuit_canvas);
+    if (!em || !em->display_name[0]) return 0;
+    char basename[DOMAIN_NAME_LEN];
+    extract_basename(app->file_path, basename, sizeof(basename));
+    if (strcmp(em->display_name, basename) == 0) return 0;
+    snprintf(out_dn, out_len, "%s", em->display_name);
+    return 1;
+}
+
 /* Build the window title from the current file basename + dirty flag and
-   push it to the graphics layer. (R-10) Title format:
-     "DCS — <basename>"        clean
-     "DCS — <basename> *"      dirty
+   push it to the graphics layer. (R-10) Title formats:
+     "DCS — <basename>"               clean, no display-name override
+     "DCS — <basename> *"             dirty,  no display-name override
+     "DCS — <basename> (<display>)"   clean, custom display name (R-1)
+     "DCS — <basename> (<display>) *" dirty,  custom display name (R-1)
    The em-dash is intentional — keeps the title scannable. */
 static void refresh_window_title(dcs_app_t *app) {
     if (!app->graph || !app->graph->set_window_title) return;
     char base[DOMAIN_NAME_LEN];
     extract_basename(app->file_path, base, sizeof(base));
     if (!base[0]) snprintf(base, sizeof(base), "%s", "untitled");
-    char title[DCS_APP_FILE_PATH_LEN + 32];
-    snprintf(title, sizeof(title),
-             app->dirty ? "DCS \xe2\x80\x94 %s *" : "DCS \xe2\x80\x94 %s",
-             base);
+    char dn[DOMAIN_NAME_LEN];
+    int has_dn = has_custom_display_name(app, dn, sizeof(dn));
+    char title[DCS_APP_FILE_PATH_LEN + DOMAIN_NAME_LEN + 32];
+    const char *star = app->dirty ? " *" : "";
+    if (has_dn) {
+        snprintf(title, sizeof(title),
+                 "DCS \xe2\x80\x94 %s (%s)%s", base, dn, star);
+    } else {
+        snprintf(title, sizeof(title),
+                 "DCS \xe2\x80\x94 %s%s", base, star);
+    }
     app->graph->set_window_title(app->graph->self, title);
 }
 
-/* Single funnel for dirty-flag changes — keeps the title in sync. (R-10) */
+/* Single funnel for dirty-flag changes — keeps the title in sync. (R-10)
+   Always refreshes the title (not just on a dirty-flag flip) because the
+   title also depends on file_path and display_name, which can change
+   while dirty stays 0 (e.g. opening a fresh file: dirty was 0, stays 0,
+   but basename + display-name swap). SetWindowTitle is cheap enough that
+   we don't need a change-detector here. */
 static void dcs_app_set_dirty(dcs_app_t *app, int dirty) {
-    int was = app->dirty;
     app->dirty = dirty ? 1 : 0;
-    if (app->dirty != was) refresh_window_title(app);
+    refresh_window_title(app);
 }
 
 /* Canvas mutation hook — any structural / geometric change marks dirty. */
 static void on_canvas_mutated(void *user) {
     dcs_app_set_dirty((dcs_app_t *)user, 1);
+}
+
+/* "<verb> <path>" + optional "(display: <name>)" when the file's
+   @display_name overrides the basename. Used on open/save so the user
+   sees the distinction at the moment they touch the file. (R-1) */
+static void set_file_status(dcs_app_t *app, const char *verb, const char *path) {
+    char dn[DOMAIN_NAME_LEN];
+    if (has_custom_display_name(app, dn, sizeof(dn))) {
+        set_status(app, "%s %s (display: %s)", verb, path, dn);
+    } else {
+        set_status(app, "%s %s", verb, path);
+    }
 }
 
 /* Strip directory and ".dcs" extension. dst must be at least DOMAIN_NAME_LEN
@@ -173,7 +216,7 @@ static void load_circuit_from_text(dcs_app_t *app, const char *path, const char 
        if present, will override below in apply_meta_from_load. */
     apply_display_name_from_path(app, path);
     apply_meta_from_load(app, &parsed_meta);
-    set_status(app, "Opened %s", path);
+    set_file_status(app, "Opened", path);
     dcs_app_set_dirty(app, 0);
 }
 
@@ -223,7 +266,7 @@ static void action_save_as(dcs_app_t *app) {
     int rc = app->platform->write_file(app->platform->self, path, text, n);
     free(text);
     if (rc != 0) { set_status(app, "Save failed"); return; }
-    set_status(app, "Saved to %s", path);
+    set_file_status(app, "Saved to", path);
     dcs_app_set_dirty(app, 0);
 }
 
@@ -238,7 +281,7 @@ static void action_save(dcs_app_t *app) {
     int rc = app->platform->write_file(app->platform->self, app->file_path, text, n);
     free(text);
     if (rc == 0) {
-        set_status(app, "Saved to %s", app->file_path);
+        set_file_status(app, "Saved to", app->file_path);
         dcs_app_set_dirty(app, 0);
     } else {
         set_status(app, "Save failed");
