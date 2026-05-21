@@ -9,12 +9,31 @@
    is selected at link time (platform_windows.c on Windows, platform_linux.c
    elsewhere). */
 
+/* Result of a 3-button confirmation dialog. Numeric values intentionally
+   match the natural Yes/No/Cancel ordering; DLG_ERROR is negative so a
+   caller can `if (r < 0)` to detect "no dialog was shown". (R-11) */
+typedef enum {
+    DLG_YES    =  0,
+    DLG_NO     =  1,
+    DLG_CANCEL =  2,
+    DLG_ERROR  = -1,
+} dialog_result_t;
+
 interface tagt_iplatform {
     void *self;
 
     /* file dialogs: return 1 on success (path written to out), 0 on cancel/error */
     int   (*open_file)  (void *self, const char *title, char *out, int max);
     int   (*save_file)  (void *self, const char *title, char *out, int max);
+
+    /* Show a modal 3-button confirmation dialog. The exact button labels
+       are platform-defined (Windows: Yes / No / Cancel); phrase the
+       message so those map naturally to the intended choices (e.g.
+       "Save changes before closing?" → Yes saves, No discards,
+       Cancel aborts). Returns one of dialog_result_t. (R-11) */
+    dialog_result_t (*confirm_yes_no_cancel)(void *self,
+                                             const char *title,
+                                             const char *message);
 
     /* file I/O — synchronous, small-file friendly (whole-file in/out).
        Streaming/chunked APIs can be added later when waveform export

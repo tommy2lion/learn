@@ -243,6 +243,38 @@ static void action_save(dcs_app_t *app) {
     }
 }
 
+/* ── save-on-close prompt (R-11) ─────────────────────────────────── */
+
+/* Quit-attempt gate: if the canvas is clean, allow the quit immediately.
+   If dirty, ask the user. Yes -> save then allow (only if save succeeded —
+   `dirty` remains 1 on serializer / write failure and on save-as cancel,
+   either of which veto the quit). No -> discard and allow. Cancel / error
+   -> veto. */
+static int on_attempt_quit(void *user) {
+    dcs_app_t *app = (dcs_app_t *)user;
+    if (!app->dirty) return 1;
+    if (!app->platform || !app->platform->confirm_yes_no_cancel) {
+        /* Platform doesn't support a confirm dialog (e.g. Linux stub);
+           safest default is to veto so the user can save manually. */
+        set_status(app, "Unsaved changes — save before closing.");
+        return 0;
+    }
+    char base[DOMAIN_NAME_LEN];
+    extract_basename(app->file_path, base, sizeof(base));
+    if (!base[0]) snprintf(base, sizeof(base), "%s", "untitled");
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "Save changes to %s before closing?", base);
+    dialog_result_t r = app->platform->confirm_yes_no_cancel(
+        app->platform->self, "Unsaved changes", msg);
+    if (r == DLG_YES) {
+        action_save(app);
+        return app->dirty ? 0 : 1;   /* save failure / save-as cancel → veto */
+    }
+    if (r == DLG_NO) return 1;       /* discard changes, allow quit */
+    return 0;                        /* DLG_CANCEL or DLG_ERROR → veto */
+}
+
 /* ── menu callback ───────────────────────────────────────────────── */
 
 static void on_menu_select(int idx, void *user) {
@@ -537,6 +569,9 @@ void dcs_app_init(dcs_app_t *self, iplatform_t *p, igraph_t *g, const char *init
     frame_init(&self->frame, g, p, &self->root->base);
     /* ESC must NOT quit — circuit_canvas uses ESC to cancel modes. */
     frame_quit(&self->frame)->esc_quits = 0;
+    /* Save-on-close gate (R-11): prompt if dirty when user X-clicks /
+       Alt-F4s / triggers any other quit path. */
+    quit_manager_set_attempt_cb(frame_quit(&self->frame), on_attempt_quit, self);
     /* Re-layout widgets when the user maximizes / resizes / restores. */
     frame_set_resize_cb(&self->frame, on_frame_resize, self);
 

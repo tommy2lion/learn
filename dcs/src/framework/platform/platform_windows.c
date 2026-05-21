@@ -100,6 +100,20 @@ static int win_set_clipboard(void *self, const char *text) {
     return 0;
 }
 
+static dialog_result_t win_confirm_yes_no_cancel(void *self,
+                                                 const char *title,
+                                                 const char *message) {
+    (void)self;
+    int r = MessageBoxA(NULL, message ? message : "", title ? title : "",
+                        MB_YESNOCANCEL | MB_ICONQUESTION | MB_APPLMODAL);
+    switch (r) {
+        case IDYES:    return DLG_YES;
+        case IDNO:     return DLG_NO;
+        case IDCANCEL: return DLG_CANCEL;
+        default:       return DLG_ERROR;
+    }
+}
+
 static int win_get_clipboard(void *self, char *out, int max) {
     (void)self;
     if (!OpenClipboard(NULL)) return -1;
@@ -123,6 +137,7 @@ static iplatform_t g_platform = {
     .time_ms        = win_time_ms,
     .set_clipboard  = win_set_clipboard,
     .get_clipboard  = win_get_clipboard,
+    .confirm_yes_no_cancel = win_confirm_yes_no_cancel,
 };
 
 iplatform_t *platform_create(void) {

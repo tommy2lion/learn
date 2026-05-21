@@ -35,6 +35,15 @@ static void spy_on_focus(widget_t *self) { (void)self; g_focus_in++;  }
 static void spy_on_blur (widget_t *self) { (void)self; g_focus_out++; }
 static const widget_vt_t SPY_VT = { .on_focus = spy_on_focus, .on_blur = spy_on_blur };
 
+/* File-scope helper for the attempt-cb test below. Returns the scripted
+   `allow` value and increments the call tally — the test casts user back
+   to the same anonymous struct it allocated on its stack. */
+int test_attempt_cb(void *u) {
+    struct { int allow; int call_count; } *s = u;
+    s->call_count++;
+    return s->allow;
+}
+
 /* mock igraph that returns "should_close = 0" — sufficient for quit_manager test */
 static int  mock_should_close(void *self)               { (void)self; return 0; }
 static int  mock_key_pressed (void *self, igraph_key_t k){ (void)self; (void)k; return 0; }
@@ -133,6 +142,50 @@ int main(void) {
         check("quit clean: not yet quitting", quit_manager_should_quit(&qm, &mock_g) == 0);
         quit_manager_request(&qm);
         check("quit after request",           quit_manager_should_quit(&qm, &mock_g) == 1);
+    }
+
+    /* ── R-11: quit_manager attempt-callback gates the decision ── */
+    {
+        igraph_t mock_g = {
+            .self = NULL,
+            .should_close = mock_should_close,
+            .key_pressed  = mock_key_pressed,
+        };
+        /* Callback honours a scripted return value, increments a tally. */
+        struct {
+            int allow;        /* what the callback returns                 */
+            int call_count;   /* incremented every call                     */
+        } script = { 0, 0 };
+        int (*cb)(void *) = NULL;   /* declared via lambda-like static fn below */
+        (void)cb;
+        /* Use a file-scope helper for the callback. */
+        extern int test_attempt_cb(void *u);
+
+        quit_manager_t qm;
+        quit_manager_init(&qm);
+        quit_manager_set_attempt_cb(&qm, test_attempt_cb, &script);
+
+        /* No quit pending → callback NOT consulted. */
+        check("attempt cb: not invoked when nothing requested",
+              quit_manager_should_quit(&qm, &mock_g) == 0 && script.call_count == 0);
+
+        /* Quit requested + cb returns 0 → vetoed, requested cleared. */
+        script.allow = 0;
+        quit_manager_request(&qm);
+        check("attempt cb: veto cancels the quit",
+              quit_manager_should_quit(&qm, &mock_g) == 0);
+        check("attempt cb: was invoked exactly once",
+              script.call_count == 1);
+        check("attempt cb: requested flag was cleared on veto",
+              quit_manager_should_quit(&qm, &mock_g) == 0 && script.call_count == 1);
+
+        /* Quit requested + cb returns 1 → quit allowed. */
+        script.allow = 1;
+        quit_manager_request(&qm);
+        check("attempt cb: allow lets the quit through",
+              quit_manager_should_quit(&qm, &mock_g) == 1);
+        check("attempt cb: invoked one more time",
+              script.call_count == 2);
     }
 
     /* ── splitter children + size accessors + min clamping ────── */

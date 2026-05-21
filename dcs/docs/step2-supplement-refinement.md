@@ -487,7 +487,7 @@ instances.
 
 ---
 
-## R-11 — Save-on-close prompt ⏸
+## R-11 — Save-on-close prompt ✅
 
 **Observation.** Closing the window with unsaved changes silently
 discards them. Users coming from any modern editor expect a

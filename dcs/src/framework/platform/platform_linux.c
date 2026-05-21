@@ -64,6 +64,16 @@ static int lnx_get_clipboard(void *self, char *out, int max) {
     return -1;
 }
 
+static dialog_result_t lnx_confirm_yes_no_cancel(void *self,
+                                                 const char *title,
+                                                 const char *message) {
+    (void)self; (void)title; (void)message;
+    /* Zenity wrapper would go here for the real Linux build; the
+       Phase-2.1 stub returns DLG_ERROR so the caller's fallback path
+       runs (treats "no dialog" as "abort the gesture safely"). */
+    return DLG_ERROR;
+}
+
 static iplatform_t g_platform = {
     .self           = NULL,
     .open_file      = lnx_open_file,
@@ -73,6 +83,7 @@ static iplatform_t g_platform = {
     .time_ms        = lnx_time_ms,
     .set_clipboard  = lnx_set_clipboard,
     .get_clipboard  = lnx_get_clipboard,
+    .confirm_yes_no_cancel = lnx_confirm_yes_no_cancel,
 };
 
 iplatform_t *platform_create(void) {

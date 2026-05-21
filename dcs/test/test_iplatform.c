@@ -46,6 +46,11 @@ int main(void) {
     char *miss = p->read_file(p->self, "this-file-should-not-exist.tmp", NULL);
     check("read_file missing -> NULL", miss == NULL);
 
+    /* ── R-11 vtable slot present (smoke only — can't drive a real
+           dialog from a test, but the slot must be non-NULL so the
+           save-on-close prompt path doesn't no-op silently) ── */
+    check("vt: confirm_yes_no_cancel",   p->confirm_yes_no_cancel != NULL);
+
     /* ── write to a path with no directory should still work
            (current dir); negative-path test is OS-dependent so skip ── */
 
