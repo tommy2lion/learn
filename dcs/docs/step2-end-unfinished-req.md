@@ -160,6 +160,13 @@ existing doc:
 | **U-37** | **Demo / example circuit gallery.** `circuits/` has scattered fixtures (half_adder, dff_stub, my_test, demo1-and3) but no curated "open this to see how DCS works" tour. | Pre-release; helpful for teachers / new users |
 | **U-38** | **No automated CI / GitHub Actions pipeline.** Build + test runs locally only. | Pre-release polish |
 
+### Late additions (2026-05-21, user-reported)
+
+| # | Item | Where | Why it matters |
+|---|---|---|---|
+| **U-39** | **External-IO pin cap = 16 is too low.** `DOMAIN_MAX_IO` in `src/domain/component.h:9` caps a circuit at 16 external inputs AND 16 external outputs. Realistic future use (chipset definitions, eventual CPU-scale designs) needs orders of magnitude more — user proposed bumping the cap to **~256**. Note: this is distinct from **U-32** (`DOMAIN_MAX_PINS_IN = 2`, the per-gate input cap). | `src/domain/component.h:9` — `#define DOMAIN_MAX_IO 16` | Foundational; same dynamic-array pattern as U-32 (Phase 3.3 variable pins). Could bundle both into one allocation refactor. |
+| **U-40** | **Wire auto-router does NOT avoid component bodies.** A user-built XOR (constructed from `not_a` / `not_b` / `a_and_not_b` / `not_a_and_b` / OR primitives — DCS has no XOR primitive yet) shows the auto-routed wire from `not_a`'s output crossing diagonally THROUGH the `not_b` gate body on its way to `not_a_and_b`'s input. Symmetric issue on the other half. See `issues/202605211856-issue-xor-gate-layout-wireline-cross-not-gate.png`. Root cause: `auto_route_wire` only knows about the producer/consumer pin positions; `auto_layout` doesn't consider wire-crossing minimisation when assigning component positions. Two router improvements possible: (a) component-avoidance in `auto_route_wire`, (b) crossing-aware placement in `auto_layout`. | `src/domain/wire_geometry.c::auto_route_wire`; `src/app/circuit_canvas_widget.c::auto_layout` | Visible UX glitch on the first composite circuit a teacher might build. Worth fixing before any v1 demo. Likely (a) is enough; (b) is a deeper algorithmic upgrade. |
+
 ---
 
 ## 8. Recommended Step 3 integration
@@ -169,10 +176,10 @@ A first-pass mapping of these 38 items to the proposed Step 3 phases
 
 | Step 3 phase | Items folded in |
 |---|---|
-| **3.0 Hardening + polish** | U-1, U-2, U-3, U-5, U-6, U-7, U-8, U-9, U-10, U-11, U-12, U-13, U-29, U-31, U-35, U-36, U-37, U-38 |
+| **3.0 Hardening + polish** | U-1, U-2, U-3, U-5, U-6, U-7, U-8, U-9, U-10, U-11, U-12, U-13, U-29, U-31, U-35, U-36, U-37, U-38, U-40 |
 | **3.1 Shape DSL + renderer (U-21)** | U-17, U-26, U-30 |
 | **3.2 Toolbar icons (U-26)** | (folded into 3.1) |
-| **3.3 Variable pin count** | U-15, U-32 |
+| **3.3 Variable pin count + IO cap bump** | U-15, U-32, U-39 |
 | **3.4 CLK primitive (U-24)** | U-16, U-19 |
 | **3.5 Custom input sequences (U-27)** | (depends on U-10 from 3.0) |
 | **3.6 Chipsets (U-23)** | U-18 (full R-7 case enum needs chipset variety) |
@@ -189,15 +196,25 @@ few sessions than batch it with feature work.
 
 ## 9. Numbers
 
-- **Total unfinished items recorded:** **38**
+- **Total unfinished items recorded:** **40**
 - **Strictly code-quality (no new feature):** 5 (U-1 through U-5)
 - **Framework polish ("Phase 2.7" originally):** 7 (U-6 through U-12)
 - **Refinement R-* still open:** 7 (U-14 through U-20)
 - **Forward 7-1..7-8 requirements:** 8 (U-21 through U-28)
 - **Discovered during this audit:** 4 (U-35 through U-38)
+- **Late additions (user-reported 2026-05-21):** 2 (U-39, U-40)
 - **Discussion-only / candidate ideas:** 2 (U-33, U-34)
 - **Already explicitly Step-3 work in `step3-plan.md`:** 8 (U-21..U-28)
 
 The audit caught **multiple already-resolved items** that the original
 docs still flag as open — listed in §1.1. Step 3 planning can skip
 those without re-checking.
+
+---
+
+## Note
+
+After this revision, **this document's contents have been merged into
+`docs/step3-plan.md`** as the single working source. This file remains
+as a historical artefact of the carry-over audit. Future planning work
+should consult `step3-plan.md` directly.
