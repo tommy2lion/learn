@@ -45,3 +45,23 @@ The development of DCS (Digital Circuit Simulation) — design, review, code rev
 ↓
 
 **[docs/step3-plan.md](docs/step3-plan.md)** — Step 3 plan: nine phases (3.0 hardening through 3.8 design-only analog accommodation), seven open questions awaiting decisions.
+
+↓
+
+**[docs/step2-supplement-refinement.md](docs/step2-supplement-refinement.md)** — Refinement entries captured during and after Phase 13: 19 R-* items spanning UX polish, deferred cosmetic work, framework dead-code findings, and Step-3 prerequisites.
+
+↓
+
+**[docs/step2-supplement-implementation-summary.md](docs/step2-supplement-implementation-summary.md)** — Retrospective on the 13-phase supplement implementation: what shipped, where the plan held up exactly, where it bent, and the design decisions that emerged from running it.
+
+↓
+
+**[docs/step2-supplement-refinement-plan.md](docs/step2-supplement-refinement-plan.md)** — Refinement implementation plan: orders the in-scope R-* items into 9 stages (≈12–13 commits with sub-staging), each bounded enough to fit one AI session without context drift.
+
+↓
+
+**[docs/step2-supplement-refinement-summary.md](docs/step2-supplement-refinement-summary.md)** — Retrospective on the refinement work: 11 R-* items resolved, 3 partial, 6 deferred to Step 3; 561 → 683 tests across 22 commits; side-bugs and design themes that surfaced along the way.
+
+↓
+
+**[docs/step2-end-unfinished-req.md](docs/step2-end-unfinished-req.md)** — Step 2 carry-over audit: 38 unfinished requirements compiled from every Step 2 doc, cross-checked against current source. Maps each item to its proposed Step 3 phase; informs the Step 3 plan.
