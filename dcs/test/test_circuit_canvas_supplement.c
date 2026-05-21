@@ -1478,6 +1478,63 @@ int main(void) {
         circuit_destroy(c);
     }
 
+    /* ── Stage 4B.2: column overflow at LAYOUT_MAX_PER_COL ─────── */
+    {
+        /* Build a circuit with 200 AND gates all consuming the same
+           pair of inputs — all at depth 1. With LAYOUT_MAX_PER_COL =
+           128, the 200 must split into 2 sub-columns at distinct x. */
+        circuit_t *c = circuit_create();
+        check("setup: input a", circuit_add_input(c, "a") == 0);
+        check("setup: input b", circuit_add_input(c, "b") == 0);
+        const int N = 200;
+        for (int i = 0; i < N; i++) {
+            char nm[DOMAIN_NAME_LEN];
+            snprintf(nm, sizeof(nm), "g%03d", i);
+            component_t *g = gate_and_create(nm);
+            if (circuit_add_component(c, g, "a", "b") != 0) {
+                check("setup: add gate failed", 0);
+                circuit_destroy(c);
+                goto overflow_done;
+            }
+        }
+        circuit_canvas_widget_t *cw =
+            circuit_canvas_widget_create((rect_t){0, 0, 1280, 800}, c);
+
+        /* Collect unique x values across the 200 components. */
+        float xs[8] = {0};
+        int n_xs = 0;
+        for (int i = 0; i < N; i++) {
+            float x = c->components[i]->position.x;
+            int found = 0;
+            for (int j = 0; j < n_xs; j++) if (xs[j] == x) { found = 1; break; }
+            if (!found && n_xs < 8) xs[n_xs++] = x;
+        }
+        check("overflow: 200 gates at depth 1 split across >=2 x positions",
+              n_xs >= 2);
+        check("overflow: exactly 2 sub-columns (ceil(200/128)=2)",
+              n_xs == 2);
+
+        /* No two components share the same (x, y). */
+        int dupes = 0;
+        for (int i = 0; i < N; i++) {
+            vec2_t pi = c->components[i]->position;
+            for (int j = i + 1; j < N; j++) {
+                vec2_t pj = c->components[j]->position;
+                if (pi.x == pj.x && pi.y == pj.y) { dupes++; break; }
+            }
+        }
+        check("overflow: every component at a unique (x, y)", dupes == 0);
+
+        /* The two sub-columns are adjacent in x (one LAYOUT_X_STEP apart). */
+        float gap = xs[0] > xs[1] ? xs[0] - xs[1] : xs[1] - xs[0];
+        check("overflow: sub-columns one X_STEP apart (180px)",
+              gap > 179.0f && gap < 181.0f);
+
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    overflow_done: ;
+    }
+
     printf("\n%d / %d passed\n", total - failures, total);
     return failures == 0 ? 0 : 1;
 }

@@ -137,45 +137,77 @@ static void auto_layout(circuit_t *c) {
     int output_col = max_depth + 1;
     int total_cols = output_col + 1;
 
-    int *col_total = (int *)calloc(total_cols, sizeof(int));
-    int *col_idx   = (int *)calloc(total_cols, sizeof(int));
-    if (!col_total || !col_idx) {
+    int *col_total      = (int *)calloc(total_cols, sizeof(int));
+    int *col_idx        = (int *)calloc(total_cols, sizeof(int));
+    int *num_sub_cols   = (int *)calloc(total_cols, sizeof(int));
+    int *base_global_col = (int *)calloc(total_cols, sizeof(int));
+    if (!col_total || !col_idx || !num_sub_cols || !base_global_col) {
         free(depths); free(col_total); free(col_idx);
+        free(num_sub_cols); free(base_global_col);
         return;                /* OOM */
     }
     col_total[0] = c->input_count;
     for (int i = 0; i < c->component_count; i++) col_total[depths[i] >= 1 ? depths[i] : 1]++;
     col_total[output_col] += c->output_count;
 
-    /* place inputs */
+    /* Stage 4B.2: column overflow. Each depth with > LAYOUT_MAX_PER_COL
+       components splits into ceil(n / LAYOUT_MAX_PER_COL) sub-columns
+       at adjacent global-column indices. Small circuits (no depth
+       exceeds the cap) get num_sub_cols[d] == 1 everywhere, so the
+       global-column indexing degenerates to the old depth-index scheme
+       and layout output is bit-identical. */
+    for (int d = 0; d < total_cols; d++) {
+        int n = col_total[d];
+        num_sub_cols[d] = (n <= 0) ? 1
+                                   : (n + LAYOUT_MAX_PER_COL - 1) / LAYOUT_MAX_PER_COL;
+    }
+    base_global_col[0] = 0;
+    for (int d = 1; d < total_cols; d++) {
+        base_global_col[d] = base_global_col[d - 1] + num_sub_cols[d - 1];
+    }
+
+    /* place inputs (DOMAIN_MAX_IO <= 128 in v1.0.0, so always 1 sub-col) */
     for (int i = 0; i < c->input_count; i++) {
         int row = col_idx[0]++;
+        int gc  = base_global_col[0];
         c->input_positions[i] = (vec2_t){
-            LAYOUT_X_OFFSET + 0 * LAYOUT_X_STEP,
+            LAYOUT_X_OFFSET + gc * LAYOUT_X_STEP,
             LAYOUT_Y_CENTER + (row - (col_total[0] - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
-    /* place components */
+    /* place components — overflow into sub-columns when a depth's
+       count exceeds LAYOUT_MAX_PER_COL */
     for (int i = 0; i < c->component_count; i++) {
-        int d = depths[i] >= 1 ? depths[i] : 1;
-        int row = col_idx[d]++;
+        int d        = depths[i] >= 1 ? depths[i] : 1;
+        int abs_idx  = col_idx[d]++;
+        int sub_idx  = abs_idx / LAYOUT_MAX_PER_COL;
+        int row      = abs_idx % LAYOUT_MAX_PER_COL;
+        int gc       = base_global_col[d] + sub_idx;
+        /* How many components actually live in THIS sub-column. The
+           last sub-column may be partial; centring uses this count so
+           the partial sub-column doesn't visually shift relative to the
+           full ones. */
+        int rows_in_sub = col_total[d] - sub_idx * LAYOUT_MAX_PER_COL;
+        if (rows_in_sub > LAYOUT_MAX_PER_COL) rows_in_sub = LAYOUT_MAX_PER_COL;
         c->components[i]->position = (vec2_t){
-            LAYOUT_X_OFFSET + d * LAYOUT_X_STEP,
-            LAYOUT_Y_CENTER + (row - (col_total[d] - 1) * 0.5f) * LAYOUT_Y_STEP,
+            LAYOUT_X_OFFSET + gc * LAYOUT_X_STEP,
+            LAYOUT_Y_CENTER + (row - (rows_in_sub - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
-    /* place outputs */
+    /* place outputs (DOMAIN_MAX_IO <= 128, so always 1 sub-col) */
     for (int i = 0; i < c->output_count; i++) {
         int row = col_idx[output_col]++;
+        int gc  = base_global_col[output_col];
         c->output_positions[i] = (vec2_t){
-            LAYOUT_X_OFFSET + output_col * LAYOUT_X_STEP,
+            LAYOUT_X_OFFSET + gc * LAYOUT_X_STEP,
             LAYOUT_Y_CENTER + (row - (col_total[output_col] - 1) * 0.5f) * LAYOUT_Y_STEP,
         };
     }
 
     free(depths); free(col_total); free(col_idx);
+    free(num_sub_cols); free(base_global_col);
 }
 
 /* ── per-node geometry ────────────────────────────────────────────── */
