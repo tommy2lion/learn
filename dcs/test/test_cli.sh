@@ -85,6 +85,53 @@ rm -f "$TMPFILE"
 out=$($EXE circuits/not_gate.dcs --input "a=1")
 check "not(1) compact" "a=1 -> y=0" "$out"
 
+# 9. R-16: --help exits 0, prints to stdout, mentions key flags
+if $EXE --help > /tmp/dcs_help.$$ 2>&1; then
+    if grep -q -- "--input" /tmp/dcs_help.$$ && grep -q -- "--help-format" /tmp/dcs_help.$$; then
+        printf "PASS  --help: exits 0 and mentions --input and --help-format\n"
+        PASS=$((PASS + 1))
+    else
+        printf "FAIL  --help: missing expected content\n"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    printf "FAIL  --help should exit 0\n"
+    FAIL=$((FAIL + 1))
+fi
+rm -f /tmp/dcs_help.$$
+
+# 10. R-16: -h is an alias for --help
+# Strip CRs from both sides — check() only strips `actual`, so comparing two
+# captured CRLF outputs without pre-stripping would always fail on Windows.
+out_long=$($EXE --help | tr -d '\r')
+out_short=$($EXE -h    | tr -d '\r')
+check "-h is alias for --help" "$out_long" "$out_short"
+
+# 11. R-16: --help-format exits 0 and covers all annotation grammars
+if $EXE --help-format > /tmp/dcs_format.$$ 2>&1; then
+    ok=1
+    for needle in "GATE KINDS" "@layout" "@wires" "@display_mode" "@display_name" "@pin_style" "Half adder" "multiplexer"; do
+        grep -q -- "$needle" /tmp/dcs_format.$$ || { printf "FAIL  --help-format missing: %s\n" "$needle"; ok=0; FAIL=$((FAIL + 1)); }
+    done
+    if [ "$ok" = "1" ]; then
+        printf "PASS  --help-format: covers grammar, annotations, and worked examples\n"
+        PASS=$((PASS + 1))
+    fi
+else
+    printf "FAIL  --help-format should exit 0\n"
+    FAIL=$((FAIL + 1))
+fi
+rm -f /tmp/dcs_format.$$
+
+# 12. R-16: --help with zero positional args still succeeds (no "missing file")
+if $EXE --help > /dev/null 2>&1; then
+    printf "PASS  --help with no positional args exits 0\n"
+    PASS=$((PASS + 1))
+else
+    printf "FAIL  --help with no positional args should exit 0\n"
+    FAIL=$((FAIL + 1))
+fi
+
 echo
 printf "%d passed, %d failed\n" "$PASS" "$FAIL"
 exit $FAIL

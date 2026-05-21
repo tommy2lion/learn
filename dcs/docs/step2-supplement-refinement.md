@@ -691,7 +691,7 @@ helper, two surface integrations (GUI About + CLI flag).
 
 ---
 
-## R-16 — Rich CLI `--help` so AI tools can generate `.dcs` files ⏸
+## R-16 — Rich CLI `--help` so AI tools can generate `.dcs` files ✅
 
 **Observation (user).** AI tools (Claude, ChatGPT, etc.) can
 generate `.dcs` files if they understand the format. Today's
