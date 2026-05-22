@@ -20,6 +20,7 @@ typedef enum {
 typedef enum {
     PLACE_NONE,
     PLACE_AND, PLACE_OR, PLACE_NOT,
+    PLACE_NAND, PLACE_NOR, PLACE_XOR, PLACE_XNOR,   /* U-45 */
     PLACE_INPUT, PLACE_OUTPUT,
 } place_kind_t;
 

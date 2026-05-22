@@ -69,9 +69,10 @@ else
     PASS=$((PASS + 1))
 fi
 
-# 7. Error: parse error (unknown gate)
+# 7. Error: parse error (unknown gate — `xor` is a real primitive
+#    since U-45, so pick a token that's still nonsense)
 TMPFILE=$(mktemp -t dcs_bad.XXXXXX.dcs)
-printf "inputs: a, b\noutputs: y\ny = xor(a, b)\n" > "$TMPFILE"
+printf "inputs: a, b\noutputs: y\ny = bogus(a, b)\n" > "$TMPFILE"
 if $EXE "$TMPFILE" --input "a=0,b=0" >/dev/null 2>&1; then
     printf "FAIL  parse error should exit non-zero\n"
     FAIL=$((FAIL + 1))

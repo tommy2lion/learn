@@ -48,6 +48,10 @@ const char *component_kind_name(component_kind_t k) {
         case COMP_AND:     return "and";
         case COMP_OR:      return "or";
         case COMP_NOT:     return "not";
+        case COMP_NAND:    return "nand";
+        case COMP_NOR:     return "nor";
+        case COMP_XOR:     return "xor";
+        case COMP_XNOR:    return "xnor";
         case COMP_CHIPSET: return "chipset";
     }
     return "?";

@@ -102,9 +102,13 @@ static int parse_gate_expr(const char *s, component_kind_t *kind_out,
     gate_name[nlen] = '\0';
     str_trim(gate_name);
 
-    if      (strcmp(gate_name, "and") == 0) *kind_out = COMP_AND;
-    else if (strcmp(gate_name, "or")  == 0) *kind_out = COMP_OR;
-    else if (strcmp(gate_name, "not") == 0) *kind_out = COMP_NOT;
+    if      (strcmp(gate_name, "and")  == 0) *kind_out = COMP_AND;
+    else if (strcmp(gate_name, "or")   == 0) *kind_out = COMP_OR;
+    else if (strcmp(gate_name, "not")  == 0) *kind_out = COMP_NOT;
+    else if (strcmp(gate_name, "nand") == 0) *kind_out = COMP_NAND;
+    else if (strcmp(gate_name, "nor")  == 0) *kind_out = COMP_NOR;
+    else if (strcmp(gate_name, "xor")  == 0) *kind_out = COMP_XOR;
+    else if (strcmp(gate_name, "xnor") == 0) *kind_out = COMP_XNOR;
     else return -1;
 
     int alen = (int)(rp - lp - 1);
@@ -117,7 +121,9 @@ static int parse_gate_expr(const char *s, component_kind_t *kind_out,
     int n = parse_namelist(arg_str, args, 2);
     if (n < 0) return -1;
     if (*kind_out == COMP_NOT && n != 1) return -1;
-    if ((*kind_out == COMP_AND || *kind_out == COMP_OR) && n != 2) return -1;
+    if ((*kind_out == COMP_AND  || *kind_out == COMP_OR  ||
+         *kind_out == COMP_NAND || *kind_out == COMP_NOR ||
+         *kind_out == COMP_XOR  || *kind_out == COMP_XNOR) && n != 2) return -1;
 
     memcpy(in1, args[0], DOMAIN_NAME_LEN);
     if (n >= 2) memcpy(in2, args[1], DOMAIN_NAME_LEN);
@@ -468,10 +474,14 @@ circuit_t *circuit_io_parse_ex(const char *text, char *err_out, int err_len,
 
         component_t *comp = NULL;
         switch (kind) {
-            case COMP_AND: comp = gate_and_create(lhs); break;
-            case COMP_OR:  comp = gate_or_create (lhs); break;
-            case COMP_NOT: comp = gate_not_create(lhs); break;
-            default:       break;
+            case COMP_AND:  comp = gate_and_create (lhs); break;
+            case COMP_OR:   comp = gate_or_create  (lhs); break;
+            case COMP_NOT:  comp = gate_not_create (lhs); break;
+            case COMP_NAND: comp = gate_nand_create(lhs); break;
+            case COMP_NOR:  comp = gate_nor_create (lhs); break;
+            case COMP_XOR:  comp = gate_xor_create (lhs); break;
+            case COMP_XNOR: comp = gate_xnor_create(lhs); break;
+            default:        break;
         }
         if (!comp) return fail(c, err_out, err_len, lineno, "out of memory");
 

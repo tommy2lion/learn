@@ -21,7 +21,8 @@ static void check(const char *name, int cond) {
 
 /* Per side_toolbar.c (kept in sync — these are the hardcoded rects):
    HPAD = 12, BTN_H = 40, VIEW_BTN_H = 38, VIEW_BTN_PAD = 14.
-   ITEMS y-offsets: AND 60, OR 110, NOT 160, +INPUT 230, +OUTPUT 280. */
+   ITEMS y-offsets (U-45): AND 60, OR 105, NOT 150, NAND 195, NOR 240,
+   XOR 285, XNOR 330, +INPUT 400, +OUTPUT 445. */
 static vec2_t item_centre(rect_t toolbar_b, int item_y) {
     return (vec2_t){
         toolbar_b.x + toolbar_b.w * 0.5f,
@@ -106,12 +107,31 @@ int main(void) {
         circuit_t *c = circuit_create();
         circuit_canvas_widget_t *cw = circuit_canvas_widget_create((rect_t){200, 0, 600, 400}, c);
         side_toolbar_t *tb = side_toolbar_create(TB, cw);
-        event_t e = left_press(item_centre(TB, 230));
+        event_t e = left_press(item_centre(TB, 400));
         widget_handle_event(&tb->base, &e);
         check("click +INPUT:  place_kind == PLACE_INPUT",  cw->place_kind == PLACE_INPUT);
-        e = left_press(item_centre(TB, 280));
+        e = left_press(item_centre(TB, 445));
         widget_handle_event(&tb->base, &e);
         check("click +OUTPUT: place_kind == PLACE_OUTPUT", cw->place_kind == PLACE_OUTPUT);
+        widget_destroy(&tb->base);
+        widget_destroy(&cw->base);
+        circuit_destroy(c);
+    }
+
+    /* ── click NAND / NOR / XOR / XNOR arms the matching kind (U-45) ─ */
+    {
+        circuit_t *c = circuit_create();
+        circuit_canvas_widget_t *cw = circuit_canvas_widget_create((rect_t){200, 0, 600, 400}, c);
+        side_toolbar_t *tb = side_toolbar_create(TB, cw);
+        event_t e;
+        e = left_press(item_centre(TB, 195)); widget_handle_event(&tb->base, &e);
+        check("click NAND: place_kind == PLACE_NAND", cw->place_kind == PLACE_NAND);
+        e = left_press(item_centre(TB, 240)); widget_handle_event(&tb->base, &e);
+        check("click NOR:  place_kind == PLACE_NOR",  cw->place_kind == PLACE_NOR);
+        e = left_press(item_centre(TB, 285)); widget_handle_event(&tb->base, &e);
+        check("click XOR:  place_kind == PLACE_XOR",  cw->place_kind == PLACE_XOR);
+        e = left_press(item_centre(TB, 330)); widget_handle_event(&tb->base, &e);
+        check("click XNOR: place_kind == PLACE_XNOR", cw->place_kind == PLACE_XNOR);
         widget_destroy(&tb->base);
         widget_destroy(&cw->base);
         circuit_destroy(c);

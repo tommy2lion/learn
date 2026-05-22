@@ -17,6 +17,7 @@ typedef uint8_t signal_t;
 
 typedef enum {
     COMP_AND, COMP_OR, COMP_NOT,
+    COMP_NAND, COMP_NOR, COMP_XOR, COMP_XNOR,    /* U-45 */
     COMP_CHIPSET,                  /* reserved — Phase 2.6+ */
 } component_kind_t;
 
@@ -49,9 +50,13 @@ class tagt_component {
 
 /* ── primitive factories ──────────────────────────────────────────── */
 
-component_t *gate_and_create(const char *name);
-component_t *gate_or_create (const char *name);
-component_t *gate_not_create(const char *name);
+component_t *gate_and_create (const char *name);
+component_t *gate_or_create  (const char *name);
+component_t *gate_not_create (const char *name);
+component_t *gate_nand_create(const char *name);
+component_t *gate_nor_create (const char *name);
+component_t *gate_xor_create (const char *name);
+component_t *gate_xnor_create(const char *name);
 
 /* ── polymorphic helpers (safe with NULL) ─────────────────────────── */
 

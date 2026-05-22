@@ -243,6 +243,113 @@ static void test_waveform_null_safety(void) {
     waveform_release(&w);
 }
 
+/* Stage 8.5 (U-45): NAND / NOR / XOR / XNOR primitives. Two checks
+   per gate: (a) truth table is correct including SIG_UNDEF handling,
+   (b) shape exposed via vtable has the expected op count. Parser
+   round-trip handled in a separate test below. */
+static void check_truth(component_t *c, signal_t a, signal_t b, signal_t expect,
+                        const char *gate_label) {
+    signal_t in[2] = {a, b}, out[1] = {SIG_UNDEF};
+    c->vt->evaluate(c, in, out);
+    char msg[64];
+    snprintf(msg, sizeof msg, "%s(%d,%d) == %d", gate_label, a, b, expect);
+    check(msg, out[0] == expect);
+}
+
+static void test_new_primitives_truth_tables(void) {
+    /* NAND: NOT(a AND b) */
+    component_t *n = gate_nand_create("g");
+    check_truth(n, SIG_LOW,   SIG_LOW,   SIG_HIGH,  "nand");
+    check_truth(n, SIG_LOW,   SIG_HIGH,  SIG_HIGH,  "nand");
+    check_truth(n, SIG_HIGH,  SIG_HIGH,  SIG_LOW,   "nand");
+    check_truth(n, SIG_LOW,   SIG_UNDEF, SIG_HIGH,  "nand"); /* short-circuit */
+    check_truth(n, SIG_HIGH,  SIG_UNDEF, SIG_UNDEF, "nand");
+    component_destroy(n);
+
+    /* NOR: NOT(a OR b) */
+    component_t *r = gate_nor_create("g");
+    check_truth(r, SIG_LOW,   SIG_LOW,   SIG_HIGH,  "nor");
+    check_truth(r, SIG_HIGH,  SIG_LOW,   SIG_LOW,   "nor");
+    check_truth(r, SIG_HIGH,  SIG_HIGH,  SIG_LOW,   "nor");
+    check_truth(r, SIG_HIGH,  SIG_UNDEF, SIG_LOW,   "nor"); /* short-circuit */
+    check_truth(r, SIG_LOW,   SIG_UNDEF, SIG_UNDEF, "nor");
+    component_destroy(r);
+
+    /* XOR: a != b */
+    component_t *x = gate_xor_create("g");
+    check_truth(x, SIG_LOW,   SIG_LOW,   SIG_LOW,   "xor");
+    check_truth(x, SIG_LOW,   SIG_HIGH,  SIG_HIGH,  "xor");
+    check_truth(x, SIG_HIGH,  SIG_LOW,   SIG_HIGH,  "xor");
+    check_truth(x, SIG_HIGH,  SIG_HIGH,  SIG_LOW,   "xor");
+    check_truth(x, SIG_HIGH,  SIG_UNDEF, SIG_UNDEF, "xor");
+    component_destroy(x);
+
+    /* XNOR: a == b */
+    component_t *xn = gate_xnor_create("g");
+    check_truth(xn, SIG_LOW,  SIG_LOW,   SIG_HIGH,  "xnor");
+    check_truth(xn, SIG_LOW,  SIG_HIGH,  SIG_LOW,   "xnor");
+    check_truth(xn, SIG_HIGH, SIG_HIGH,  SIG_HIGH,  "xnor");
+    check_truth(xn, SIG_HIGH, SIG_UNDEF, SIG_UNDEF, "xnor");
+    component_destroy(xn);
+}
+
+static void check_new_shape(component_t *c, int expected_n_ops,
+                            shape_op_kind_t expected_last_kind,
+                            const char *gate_label) {
+    const shape_t *s = c->vt->shape ? c->vt->shape() : NULL;
+    char msg[80];
+    snprintf(msg, sizeof msg, "%s: shape non-NULL", gate_label);
+    check(msg, s != NULL);
+    snprintf(msg, sizeof msg, "%s: %d ops", gate_label, expected_n_ops);
+    check(msg, s && s->n_ops == expected_n_ops);
+    snprintf(msg, sizeof msg, "%s: last op kind == %d", gate_label, expected_last_kind);
+    check(msg, s && s->ops[s->n_ops - 1].kind == expected_last_kind);
+}
+
+static void test_new_primitives_shapes(void) {
+    component_t *c;
+    c = gate_nand_create("g"); check_new_shape(c, 5, SHAPE_OP_CIRCLE, "NAND"); component_destroy(c);
+    c = gate_nor_create ("g"); check_new_shape(c, 6, SHAPE_OP_CIRCLE, "NOR");  component_destroy(c);
+    c = gate_xor_create ("g"); check_new_shape(c, 6, SHAPE_OP_ARC,    "XOR");  component_destroy(c);
+    c = gate_xnor_create("g"); check_new_shape(c, 7, SHAPE_OP_CIRCLE, "XNOR"); component_destroy(c);
+}
+
+static void test_new_primitives_parser_round_trip(void) {
+    const char *src =
+        "inputs: a, b\n"
+        "outputs: y_nand, y_nor, y_xor, y_xnor\n"
+        "y_nand = nand(a, b)\n"
+        "y_nor  = nor (a, b)\n"
+        "y_xor  = xor (a, b)\n"
+        "y_xnor = xnor(a, b)\n";
+    char err[256] = {0};
+    circuit_t *c = circuit_io_parse(src, err, sizeof err);
+    check("new primitives: parse succeeds", c != NULL);
+    if (!c) { printf("  parse err: %s\n", err); return; }
+    check("new primitives: 4 components placed", c->component_count == 4);
+    check("new primitives: kind[0] == NAND", c->components[0]->vt->kind == COMP_NAND);
+    check("new primitives: kind[1] == NOR",  c->components[1]->vt->kind == COMP_NOR);
+    check("new primitives: kind[2] == XOR",  c->components[2]->vt->kind == COMP_XOR);
+    check("new primitives: kind[3] == XNOR", c->components[3]->vt->kind == COMP_XNOR);
+
+    /* Round-trip via serialize → parse. */
+    char *text = circuit_io_serialize(c);
+    check("new primitives: serialize succeeds", text != NULL);
+    circuit_t *c2 = circuit_io_parse(text, err, sizeof err);
+    check("new primitives: re-parse succeeds", c2 != NULL);
+    if (c2) {
+        check("new primitives: round-trip kinds preserved",
+              c2->component_count == 4 &&
+              c2->components[0]->vt->kind == COMP_NAND &&
+              c2->components[1]->vt->kind == COMP_NOR  &&
+              c2->components[2]->vt->kind == COMP_XOR  &&
+              c2->components[3]->vt->kind == COMP_XNOR);
+        circuit_destroy(c2);
+    }
+    free(text);
+    circuit_destroy(c);
+}
+
 /* Stage 7 (U-21 part 2): each primitive gate exposes a shape via its
    vtable. The op list and per-op kinds are part of the public contract
    — the canvas's draw_node and the toolbar's icon path both depend on
@@ -328,6 +435,10 @@ int main(void) {
     test_domain_max_io_32_round_trip();
     /* Step 3 v1.0.0 Stage 7 (U-21 part 2) */
     test_gate_shapes();
+    /* Step 3 v1.0.0 Stage 8.5 (U-45) */
+    test_new_primitives_truth_tables();
+    test_new_primitives_shapes();
+    test_new_primitives_parser_round_trip();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

@@ -822,12 +822,20 @@ static void place_at(circuit_canvas_widget_t *cw, vec2_t world) {
     char nm[DOMAIN_NAME_LEN];
     component_t *comp = NULL;
     switch (cw->place_kind) {
-        case PLACE_AND: next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
-                        comp = gate_and_create(nm); break;
-        case PLACE_OR:  next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
-                        comp = gate_or_create(nm);  break;
-        case PLACE_NOT: next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
-                        comp = gate_not_create(nm); break;
+        case PLACE_AND:  next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_and_create (nm); break;
+        case PLACE_OR:   next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_or_create  (nm); break;
+        case PLACE_NOT:  next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_not_create (nm); break;
+        case PLACE_NAND: next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_nand_create(nm); break;
+        case PLACE_NOR:  next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_nor_create (nm); break;
+        case PLACE_XOR:  next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_xor_create (nm); break;
+        case PLACE_XNOR: next_name(cw, "g", &cw->counter_gate, nm, sizeof(nm));
+                         comp = gate_xnor_create(nm); break;
         case PLACE_INPUT: {
             char in[DOMAIN_NAME_LEN];
             next_name(cw, "in", &cw->counter_in, in, sizeof(in));

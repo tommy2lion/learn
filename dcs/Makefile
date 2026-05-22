@@ -104,6 +104,10 @@ SHA256_HDR = src/sha256.h
 DOMAIN_SRC = src/domain/gate_and.c \
              src/domain/gate_or.c \
              src/domain/gate_not.c \
+             src/domain/gate_nand.c \
+             src/domain/gate_nor.c \
+             src/domain/gate_xor.c \
+             src/domain/gate_xnor.c \
              src/domain/circuit.c \
              src/domain/circuit_io.c \
              src/domain/waveform.c \

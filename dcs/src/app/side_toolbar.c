@@ -27,10 +27,14 @@ typedef struct tagt_stb_item { float y; const char *label; place_kind_t kind; } 
 
 static const stb_item_t ITEMS[] = {
     {  60, "AND",      PLACE_AND    },
-    { 110, "OR",       PLACE_OR     },
-    { 160, "NOT",      PLACE_NOT    },
-    { 230, "+ INPUT",  PLACE_INPUT  },
-    { 280, "+ OUTPUT", PLACE_OUTPUT },
+    { 105, "OR",       PLACE_OR     },
+    { 150, "NOT",      PLACE_NOT    },
+    { 195, "NAND",     PLACE_NAND   },
+    { 240, "NOR",      PLACE_NOR    },
+    { 285, "XOR",      PLACE_XOR    },
+    { 330, "XNOR",     PLACE_XNOR   },
+    { 400, "+ INPUT",  PLACE_INPUT  },
+    { 445, "+ OUTPUT", PLACE_OUTPUT },
 };
 #define ITEM_COUNT ((int)(sizeof(ITEMS) / sizeof(ITEMS[0])))
 
@@ -66,32 +70,38 @@ static int hits_rect(rect_t r, vec2_t p) {
    inside its gate_*.c, so the pointer stays valid after the
    component is destroyed — we only need to construct a component
    once to reach the vtable. */
-static const shape_t *cached_and_shape = NULL;
-static const shape_t *cached_or_shape  = NULL;
-static const shape_t *cached_not_shape = NULL;
+/* One cache slot per place_kind that maps to a gate shape. The
+   shape_t returned by each gate's vt->shape() is a `static const`
+   inside its gate_*.c, so the pointer stays valid after the
+   component is destroyed — we only need to construct a component
+   once to reach the vtable. */
+static const shape_t *cached_and_shape  = NULL;
+static const shape_t *cached_or_shape   = NULL;
+static const shape_t *cached_not_shape  = NULL;
+static const shape_t *cached_nand_shape = NULL;
+static const shape_t *cached_nor_shape  = NULL;
+static const shape_t *cached_xor_shape  = NULL;
+static const shape_t *cached_xnor_shape = NULL;
+
+static const shape_t *shape_via(const shape_t **slot,
+                                component_t *(*factory)(const char *)) {
+    if (!*slot) {
+        component_t *c = factory("_");
+        if (c) { *slot = c->vt->shape(); component_destroy(c); }
+    }
+    return *slot;
+}
 
 static const shape_t *shape_for_place_kind(place_kind_t k) {
     switch (k) {
-        case PLACE_AND:
-            if (!cached_and_shape) {
-                component_t *c = gate_and_create("_");
-                if (c) { cached_and_shape = c->vt->shape(); component_destroy(c); }
-            }
-            return cached_and_shape;
-        case PLACE_OR:
-            if (!cached_or_shape) {
-                component_t *c = gate_or_create("_");
-                if (c) { cached_or_shape = c->vt->shape(); component_destroy(c); }
-            }
-            return cached_or_shape;
-        case PLACE_NOT:
-            if (!cached_not_shape) {
-                component_t *c = gate_not_create("_");
-                if (c) { cached_not_shape = c->vt->shape(); component_destroy(c); }
-            }
-            return cached_not_shape;
-        default:
-            return NULL;
+        case PLACE_AND:  return shape_via(&cached_and_shape,  gate_and_create);
+        case PLACE_OR:   return shape_via(&cached_or_shape,   gate_or_create);
+        case PLACE_NOT:  return shape_via(&cached_not_shape,  gate_not_create);
+        case PLACE_NAND: return shape_via(&cached_nand_shape, gate_nand_create);
+        case PLACE_NOR:  return shape_via(&cached_nor_shape,  gate_nor_create);
+        case PLACE_XOR:  return shape_via(&cached_xor_shape,  gate_xor_create);
+        case PLACE_XNOR: return shape_via(&cached_xnor_shape, gate_xnor_create);
+        default:         return NULL;
     }
 }
 

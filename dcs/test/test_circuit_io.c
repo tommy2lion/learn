@@ -195,8 +195,9 @@ static void test_error_syntax(void) {
     check("syntax: missing '=' -> NULL", c == NULL);
     if (c) circuit_destroy(c);
 
-    /* unknown gate name */
-    const char *s2 = "inputs: a, b\noutputs: y\ny = xor(a, b)\n";
+    /* unknown gate name — `xor` is now a real primitive (U-45), so
+       pick a token that's still nonsense. */
+    const char *s2 = "inputs: a, b\noutputs: y\ny = bogus(a, b)\n";
     c = circuit_io_parse(s2, err, sizeof(err));
     check("syntax: unknown gate -> NULL", c == NULL);
     if (c) circuit_destroy(c);
