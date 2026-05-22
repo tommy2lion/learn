@@ -22,7 +22,11 @@
 static int failures = 0, total = 0;
 
 /* Mutation-callback tally helper for R-10 dirty-flag tests. */
-static void count_mutations(void *user) { (*(int *)user)++; }
+static const char *last_mutation_label = NULL;
+static void count_mutations(void *user, const char *label) {
+    (*(int *)user)++;
+    last_mutation_label = label;
+}
 
 static void check(const char *name, int cond) {
     total++;
@@ -1432,17 +1436,20 @@ int main(void) {
         check("nudge(NULL) is safe", 1);
     }
 
-    /* ── R-10: mutated_cb fires on nudge ─────────────────────────── */
+    /* ── R-10: mutated_cb fires on nudge + carries label (U-33) ── */
     {
         circuit_t *c = make_simple_circuit();
         circuit_canvas_widget_t *cw =
             circuit_canvas_widget_create((rect_t){0, 0, 800, 600}, c);
         int fired = 0;
+        last_mutation_label = NULL;
         circuit_canvas_widget_set_mutated_cb(cw, count_mutations, &fired);
         circuit_canvas_widget_select_all(cw);  /* selection-only: no fire */
         check("mutated_cb: select_all doesn't fire", fired == 0);
         circuit_canvas_widget_nudge_selection(cw, 1, 0);
         check("mutated_cb: nudge fires once", fired == 1);
+        check("mutated_cb: nudge passes 'nudged' label",
+              last_mutation_label && strcmp(last_mutation_label, "nudged") == 0);
         widget_destroy(&cw->base);
         circuit_destroy(c);
     }

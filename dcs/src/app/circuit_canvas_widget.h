@@ -32,8 +32,12 @@ typedef void (*ccw_status_fn_t)(const char *msg, void *user);
    geometry (place, connect, disconnect, delete, drag-end, wire-edit release,
    nudge). NOT fired for selection-only changes, hover, click-to-highlight,
    nor for set_circuit / load_geometry (which reset state from a file).
-   dcs_app uses this to drive the unsaved-changes flag. (R-10) */
-typedef void (*ccw_mutated_fn_t)(void *user);
+   dcs_app uses this to drive the unsaved-changes flag (R-10) and to
+   capture a per-mutation label for undo/redo status (U-33). `label` is
+   a short verb phrase like "wired" / "placed gate" / "deleted node";
+   the string is borrowed for the call and callbacks should copy it if
+   they outlive the call. NULL resolves to a generic "edit". */
+typedef void (*ccw_mutated_fn_t)(void *user, const char *label);
 
 class tagt_circuit_canvas_widget {
     widget_t        base;            /* must be first */

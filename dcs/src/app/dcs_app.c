@@ -95,7 +95,7 @@ static void dcs_app_set_dirty(dcs_app_t *app, int dirty) {
 
 /* Canvas mutation hook — any structural / geometric change marks dirty
    AND (R-5) snapshots the post-mutation state into an undo command. */
-static void on_canvas_mutated(void *user);
+static void on_canvas_mutated(void *user, const char *label);
 
 /* "<verb> <path>" + optional "(display: <name>)" when the file's
    @display_name overrides the basename. Used on open/save so the user
@@ -265,6 +265,7 @@ typedef struct tagt_snapshot_cmd {
     command_t  base;
     char      *before;
     char      *after;
+    char      *label;        /* short verb phrase captured at push time (U-33) */
     dcs_app_t *app;
 } snapshot_cmd_t;
 
@@ -280,11 +281,12 @@ static void snapshot_destroy(command_t *self) {
     snapshot_cmd_t *s = (snapshot_cmd_t *)self;
     free(s->before);
     free(s->after);
+    free(s->label);
     free(s);
 }
 static const char *snapshot_describe(const command_t *self) {
-    (void)self;
-    return "edit";
+    const snapshot_cmd_t *s = (const snapshot_cmd_t *)self;
+    return (s->label && s->label[0]) ? s->label : "edit";
 }
 
 static const command_vt_t SNAPSHOT_VT = {
@@ -298,7 +300,7 @@ static const command_vt_t SNAPSHOT_VT = {
    Builds a snapshot_cmd from the previously-cached state (the "before")
    plus the freshly-serialised current state (the "after"), pushes to
    the undo stack, and refreshes the cache. (R-5) */
-static void on_canvas_mutated(void *user) {
+static void on_canvas_mutated(void *user, const char *label) {
     dcs_app_t *app = (dcs_app_t *)user;
     char *after = serialize_snapshot(app);
     if (!after) {
@@ -313,6 +315,7 @@ static void on_canvas_mutated(void *user) {
             cmd->base.vt = &SNAPSHOT_VT;
             cmd->before  = app->last_snapshot;   /* transfer ownership   */
             cmd->after   = strdup(after);        /* cache also keeps `after` */
+            cmd->label   = (label && label[0]) ? strdup(label) : NULL;
             cmd->app     = app;
             app->last_snapshot = NULL;           /* cache about to be replaced */
             command_stack_push(&app->cmds, &cmd->base);
