@@ -89,11 +89,11 @@ int main(void) {
     /* ── NULL + empty inputs ───────────────────────────────────────── */
     {
         mock_igraph_init(&g, &m);
-        shape_draw(NULL, &g, (vec2_t){0,0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(NULL, &g, (vec2_t){0,0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("NULL shape: no draws", m.line_calls == 0 && m.circle_lines_calls == 0);
 
         shape_t empty = { .ops = NULL, .n_ops = 0 };
-        shape_draw(&empty, &g, (vec2_t){0,0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(&empty, &g, (vec2_t){0,0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("empty shape: no draws", m.line_calls == 0 && m.circle_lines_calls == 0);
     }
 
@@ -102,7 +102,7 @@ int main(void) {
         mock_igraph_init(&g, &m);
         const shape_op_t ops[] = { SHAPE_LINE(0, 0, 10, 0) };
         shape_t s = { .ops = ops, .n_ops = 1 };
-        shape_draw(&s, &g, (vec2_t){100, 50}, 2.0f, 1.5f, 0xAABBCCDD);
+        shape_draw(&s, &g, (vec2_t){100, 50}, (vec2_t){2.0f,2.0f}, 1.5f, 0xAABBCCDD);
         check("LINE: emits 1 draw_line",        m.line_calls == 1);
         check("LINE: a translated by origin",   near(m.last_line_a.x, 100) && near(m.last_line_a.y, 50));
         check("LINE: b scaled and translated",  near(m.last_line_b.x, 120) && near(m.last_line_b.y, 50));
@@ -115,7 +115,7 @@ int main(void) {
         mock_igraph_init(&g, &m);
         const shape_op_t ops[] = { SHAPE_CIRCLE(5, 5, 4) };
         shape_t s = { .ops = ops, .n_ops = 1 };
-        shape_draw(&s, &g, (vec2_t){200, 0}, 3.0f, 1.0f, 0xFF0000FF);
+        shape_draw(&s, &g, (vec2_t){200, 0}, (vec2_t){3.0f,3.0f}, 1.0f, 0xFF0000FF);
         check("CIRCLE: emits 1 draw_circle_lines", m.circle_lines_calls == 1);
         check("CIRCLE: emits 0 draw_line",         m.line_calls == 0);
         check("CIRCLE: center translated",
@@ -131,7 +131,7 @@ int main(void) {
             SHAPE_ARC(0, 0, 10, 0.0f, PI_2_F),
         };
         shape_t s = { .ops = ops, .n_ops = 1 };
-        shape_draw(&s, &g, (vec2_t){0, 0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(&s, &g, (vec2_t){0, 0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("ARC: quarter arc emits 8 line segments", m.line_calls == 8);
         check("ARC: emits 0 circle_lines",              m.circle_lines_calls == 0);
     }
@@ -145,7 +145,7 @@ int main(void) {
             SHAPE_LINE(5, 10,  0,  0),
         };
         shape_t s = { .ops = ops, .n_ops = 3 };
-        shape_draw(&s, &g, (vec2_t){0, 0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(&s, &g, (vec2_t){0, 0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("triangle: 3 draw_line calls",     m.line_calls == 3);
         check("triangle: 0 circle_lines calls",  m.circle_lines_calls == 0);
     }
@@ -159,7 +159,7 @@ int main(void) {
             SHAPE_ARC(0, 0, 5, 0.0f, PI_F),     /* half arc, 16 segments */
         };
         shape_t s = { .ops = ops, .n_ops = 3 };
-        shape_draw(&s, &g, (vec2_t){0, 0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(&s, &g, (vec2_t){0, 0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("mixed: 1 line + 16 arc = 17 draw_line", m.line_calls == 17);
         check("mixed: 1 draw_circle_lines",            m.circle_lines_calls == 1);
     }
@@ -168,7 +168,7 @@ int main(void) {
     {
         const shape_op_t ops[] = { SHAPE_LINE(0, 0, 1, 1) };
         shape_t s = { .ops = ops, .n_ops = 1 };
-        shape_draw(&s, NULL, (vec2_t){0, 0}, 1.0f, 1.0f, 0xFF);
+        shape_draw(&s, NULL, (vec2_t){0, 0}, (vec2_t){1.0f,1.0f}, 1.0f, 0xFF);
         check("NULL igraph: no crash", 1);
     }
 

@@ -243,6 +243,38 @@ static void test_waveform_null_safety(void) {
     waveform_release(&w);
 }
 
+/* Stage 7 (U-21 part 2): each primitive gate exposes a shape via its
+   vtable. The op list and per-op kinds are part of the public contract
+   — the canvas's draw_node and the toolbar's icon path both depend on
+   the expected counts. */
+static void test_gate_shapes(void) {
+    component_t *a = gate_and_create("g");
+    const shape_t *sa = a->vt->shape ? a->vt->shape() : NULL;
+    check("AND: shape non-NULL",        sa != NULL);
+    check("AND: 4 ops (3 line + arc)",  sa && sa->n_ops == 4);
+    check("AND: op[0] is LINE",         sa && sa->ops[0].kind == SHAPE_OP_LINE);
+    check("AND: op[3] is ARC",          sa && sa->ops[3].kind == SHAPE_OP_ARC);
+    component_destroy(a);
+
+    component_t *o = gate_or_create("g");
+    const shape_t *so = o->vt->shape ? o->vt->shape() : NULL;
+    check("OR: shape non-NULL",         so != NULL);
+    check("OR: 5 ops (3 arc + 2 lead lines)", so && so->n_ops == 5);
+    check("OR: op[0] is ARC",           so && so->ops[0].kind == SHAPE_OP_ARC);
+    check("OR: op[2] is ARC",           so && so->ops[2].kind == SHAPE_OP_ARC);
+    check("OR: op[3] is LINE",          so && so->ops[3].kind == SHAPE_OP_LINE);
+    check("OR: op[4] is LINE",          so && so->ops[4].kind == SHAPE_OP_LINE);
+    component_destroy(o);
+
+    component_t *n = gate_not_create("g");
+    const shape_t *sn = n->vt->shape ? n->vt->shape() : NULL;
+    check("NOT: shape non-NULL",        sn != NULL);
+    check("NOT: 4 ops (3 line + bubble)", sn && sn->n_ops == 4);
+    check("NOT: op[0] is LINE",         sn && sn->ops[0].kind == SHAPE_OP_LINE);
+    check("NOT: op[3] is CIRCLE",       sn && sn->ops[3].kind == SHAPE_OP_CIRCLE);
+    component_destroy(n);
+}
+
 /* Stage 4C (U-39 step 1): with DOMAIN_MAX_IO bumped 16 → 32, a 32-in /
    32-out circuit must construct cleanly AND serialize → re-parse to an
    equivalent shape. Acts as the boundary proof that nothing in the
@@ -294,6 +326,8 @@ int main(void) {
     test_waveform_null_safety();
     /* Step 3 v1.0.0 Stage 4C (U-39 step 1) */
     test_domain_max_io_32_round_trip();
+    /* Step 3 v1.0.0 Stage 7 (U-21 part 2) */
+    test_gate_shapes();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }

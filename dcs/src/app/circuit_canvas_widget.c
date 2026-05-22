@@ -1,6 +1,7 @@
 #include "circuit_canvas_widget.h"
 #include "external_view.h"
 #include "../framework/core/color.h"
+#include "../framework/shape.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -1099,57 +1100,31 @@ static void draw_node(igraph_t *g, const circuit_t *c, node_ref_t r, int hovered
         component_kind_t kind = component_kind(comp);
         rect_t box = { p.x - GATE_W / 2, p.y - GATE_H / 2, GATE_W, GATE_H };
 
-        /* Body — IEC-style rectangle for AND / OR / chipsets; ANSI-style
-           triangle with output bubble for NOT. (supplement Phase 11) */
-        if (kind == COMP_NOT) {
-            /* Triangle: apex on the right (just inside the bubble), base on
-               the left edge. Outline-only (no fill primitive available);
-               wires terminate at the right edge of the bubble = the existing
-               node_output_pin position, so wire-routing is unaffected. */
-            float left   = p.x - GATE_W / 2;
-            float top    = p.y - GATE_H / 2;
-            float bot    = p.y + GATE_H / 2;
-            vec2_t apex  = { p.x + GATE_W / 2 - BUBBLE_R * 2.0f, p.y };
-            vec2_t tl    = { left, top };
-            vec2_t bl    = { left, bot };
-            g->draw_line(g->self, tl, bl,    2.0f, COLOR_BLACK);
-            g->draw_line(g->self, tl, apex,  2.0f, COLOR_BLACK);
-            g->draw_line(g->self, bl, apex,  2.0f, COLOR_BLACK);
-            /* Output bubble — white fill so it punches a clean hole through
-               any wire that ends here; then the outline on top. */
-            vec2_t bubble = { p.x + GATE_W / 2 - BUBBLE_R, p.y };
-            g->draw_circle      (g->self, bubble, BUBBLE_R,         COLOR_WHITE);
-            g->draw_circle_lines(g->self, bubble, BUBBLE_R, 1.5f,   COLOR_BLACK);
+        /* ANSI/IEEE shape from the gate's vtable (U-21 part 2). Shape coords
+           are normalised to [-1, +1]; scale lets the [-1,+1] x maps to
+           ±GATE_W/2 and y to ±GATE_H/2, so arcs naturally stretch to fit
+           the box. Unknown kinds (chipsets, future primitives) fall back
+           to the rectangle + uppercased-kind-name glyph. */
+        const shape_t *shape = (comp->vt && comp->vt->shape)
+                               ? comp->vt->shape() : NULL;
+        if (shape) {
+            shape_draw(shape, g, p,
+                       (vec2_t){GATE_W / 2.0f, GATE_H / 2.0f},
+                       2.0f, COLOR_BLACK);
         } else {
             g->draw_rect      (g->self, box, COLOR_WHITE);
             g->draw_rect_lines(g->self, box, 2.0f, COLOR_BLACK);
-            /* IEC-style glyph for AND ('&'). For OR we'd ideally use '≥1'
-               but raylib's default font renders the ≥ (U+2265) as a tofu
-               '?'; using the ASCII "OR" keeps the look consistent across
-               platforms. Switch back to "\xe2\x89\xa5""1" when a font
-               with the IEC glyph is in use. Unknown kinds fall back to
-               the uppercased kind name (chipsets / future primitives). */
-            const char *glyph;
-            float       glyph_size;
-            char        fallback[8] = {0};
-            switch (kind) {
-                case COMP_AND: glyph = "&";                    glyph_size = 22.0f; break;
-                case COMP_OR:  glyph = "OR";                   glyph_size = 18.0f; break;
-                default: {
-                    const char *kn = component_kind_name(kind);
-                    for (int i = 0; kn[i] && i < 7; i++)
-                        fallback[i] = (char)toupper((unsigned char)kn[i]);
-                    glyph = fallback;
-                    glyph_size = 16.0f;
-                } break;
-            }
-            float gw = g->measure_text(g->self, glyph, glyph_size);
-            g->draw_text(g->self, glyph,
-                         (vec2_t){p.x - gw / 2, p.y - glyph_size / 2},
-                         glyph_size, COLOR_BLACK);
+            char fallback[8] = {0};
+            const char *kn = component_kind_name(kind);
+            for (int i = 0; kn[i] && i < 7; i++)
+                fallback[i] = (char)toupper((unsigned char)kn[i]);
+            float gw = g->measure_text(g->self, fallback, 16.0f);
+            g->draw_text(g->self, fallback,
+                         (vec2_t){p.x - gw / 2, p.y - 8.0f},
+                         16.0f, COLOR_BLACK);
         }
 
-        /* pins — NOT's output is visually represented by the bubble itself,
+        /* pins — NOT's output is the bubble at the right of the shape,
            so skip the duplicate small circle there. */
         int n_in = component_pin_count_in(comp);
         for (int j = 0; j < n_in; j++)

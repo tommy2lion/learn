@@ -3,6 +3,7 @@
 
 #include "../framework/core/oo.h"
 #include "../framework/core/rect.h"   /* vec2_t — for component layout */
+#include "../framework/shape.h"       /* shape_t — only the type; no graphics dep */
 #include <stdint.h>
 
 #define DOMAIN_NAME_LEN     64
@@ -29,6 +30,13 @@ class tagt_component_vt {
        length pin_count_out. Both are caller-supplied. */
     void (*evaluate)(component_t *self, const signal_t *in, signal_t *out);
     void (*destroy) (component_t *self);
+    /* Shape for the gate's ANSI/IEEE rendering (U-21). Returns a shape
+       in a normalised local frame: x ∈ [-1, +1], y ∈ [-1, +1] where
+       (-1, 0) is the input edge and (+1, 0) is the output pin. Callers
+       multiply by the desired half-size (GATE_W/2 etc.) at draw time
+       via the `scale` arg to shape_draw. May be NULL for components
+       that don't yet have a shape — caller should fall back. */
+    const shape_t *(*shape)(void);
 };
 typedef class tagt_component_vt component_vt_t;
 

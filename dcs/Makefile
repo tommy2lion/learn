@@ -226,15 +226,16 @@ test_cli: $(CLI_EXE) $(TEST_CLI_SH)
 
 # ── Phase 2.5: dcs_gui (app on framework + domain) ─────────────────
 $(GUI_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) \
+            $(FW_SHAPE_SRC) $(FW_SHAPE_HDR) \
             $(DOMAIN_SRC) $(APP_SRC) $(GUI_SRC) \
             $(BUILD_INFO_SRC) $(BUILD_INFO_HDR) \
             $(SHA256_SRC) $(SHA256_HDR) \
             $(FW_PLATFORM_HDR) $(FW_GRAPH_HDR) $(FW_WIDGET_HDR) \
             $(DOMAIN_HDR) $(APP_HDR)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
-		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) \
+		$(FW_PLATFORM_SRC) $(FW_GRAPH_SRC) $(FW_WIDGET_SRC) $(FW_SHAPE_SRC) \
 		$(DOMAIN_SRC) $(APP_SRC) $(BUILD_INFO_SRC) $(SHA256_SRC) $(GUI_SRC) \
-		-o $@ -lcomdlg32 $(RAYLIB_LDFL)
+		-o $@ -lcomdlg32 -lm $(RAYLIB_LDFL)
 
 gui: $(GUI_EXE)
 
@@ -253,15 +254,16 @@ TEST_CCW_SUP_SRC = test/test_circuit_canvas_supplement.c
 TEST_CCW_SUP_EXE = test/test_circuit_canvas_supplement.exe
 
 $(TEST_CCW_SUP_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                     $(FW_SHAPE_SRC) $(FW_SHAPE_HDR) \
                      $(DOMAIN_SRC) $(DOMAIN_HDR) \
                      src/app/circuit_canvas_widget.c src/app/circuit_canvas_widget.h \
                      src/app/external_view.c src/app/external_view.h \
                      src/app/editor_state.h \
                      $(TEST_CCW_SUP_SRC)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
-		$(FW_WIDGET_SRC) $(DOMAIN_SRC) \
+		$(FW_WIDGET_SRC) $(FW_SHAPE_SRC) $(DOMAIN_SRC) \
 		src/app/circuit_canvas_widget.c src/app/external_view.c \
-		$(TEST_CCW_SUP_SRC) -o $@
+		$(TEST_CCW_SUP_SRC) -o $@ -lm
 
 test_circuit_canvas_supplement: $(TEST_CCW_SUP_EXE)
 	./$(TEST_CCW_SUP_EXE)
@@ -334,6 +336,7 @@ TEST_SIDE_TOOLBAR_EXE = test/test_side_toolbar.exe
 # supplement tests use, minus dcs_app + timing_canvas (not exercised
 # here).
 $(TEST_SIDE_TOOLBAR_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
+                         $(FW_SHAPE_SRC) $(FW_SHAPE_HDR) \
                          $(DOMAIN_SRC) $(DOMAIN_HDR) \
                          src/app/circuit_canvas_widget.c src/app/circuit_canvas_widget.h \
                          src/app/side_toolbar.c src/app/side_toolbar.h \
@@ -341,9 +344,9 @@ $(TEST_SIDE_TOOLBAR_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
                          src/app/editor_state.h \
                          $(TEST_SIDE_TOOLBAR_SRC)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
-		$(DOMAIN_SRC) src/app/circuit_canvas_widget.c \
+		$(FW_SHAPE_SRC) $(DOMAIN_SRC) src/app/circuit_canvas_widget.c \
 		src/app/side_toolbar.c src/app/external_view.c \
-		$(TEST_SIDE_TOOLBAR_SRC) -o $@
+		$(TEST_SIDE_TOOLBAR_SRC) -o $@ -lm
 
 test_side_toolbar: $(TEST_SIDE_TOOLBAR_EXE)
 	./$(TEST_SIDE_TOOLBAR_EXE)
@@ -369,14 +372,15 @@ TEST_DCS_APP_EXE = test/test_dcs_app.exe
 # except the raylib backend (we use a stub igraph in the test).
 $(TEST_DCS_APP_EXE): $(FW_PLATFORM_SRC) $(FW_GRAPH_HDR) $(FW_PLATFORM_HDR) \
                     $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) \
+                    $(FW_SHAPE_SRC) $(FW_SHAPE_HDR) \
                     $(DOMAIN_SRC) $(DOMAIN_HDR) $(APP_SRC) $(APP_HDR) \
                     $(BUILD_INFO_SRC) $(BUILD_INFO_HDR) \
                     $(SHA256_SRC) $(SHA256_HDR) \
                     $(TEST_DCS_APP_SRC)
 	$(CC) $(CFLAGS) -I $(RAYLIB_INC) \
-		$(FW_PLATFORM_SRC) $(FW_WIDGET_SRC) \
+		$(FW_PLATFORM_SRC) $(FW_WIDGET_SRC) $(FW_SHAPE_SRC) \
 		$(DOMAIN_SRC) $(APP_SRC) $(BUILD_INFO_SRC) $(SHA256_SRC) \
-		$(TEST_DCS_APP_SRC) -o $@ -lcomdlg32
+		$(TEST_DCS_APP_SRC) -o $@ -lcomdlg32 -lm
 
 test_dcs_app: $(TEST_DCS_APP_EXE)
 	./$(TEST_DCS_APP_EXE)

@@ -3,8 +3,13 @@
 
 #include "core/oo.h"
 #include "core/rect.h"
-#include "graphics/igraph.h"
 #include <stdint.h>
+
+/* Forward-declare igraph instead of #include'ing graphics/igraph.h so
+   domain files (gate_and.c etc.) can declare their shape tables
+   without pulling the graphics interface into the domain layer.
+   Callers of shape_draw must already have igraph.h in scope. */
+typedef interface tagt_igraph igraph_t;
 
 /* Shape DSL (U-21 part A).
  *
@@ -55,10 +60,14 @@ typedef class tagt_shape shape_t;
     { .kind = SHAPE_OP_ARC,    .a = {(cx), (cy)}, .r = (rad), \
       .a0 = (ang0), .a1 = (ang1) }
 
-/* Draw every op through `g`. (origin + shape-local * scale) gives the
-   world-space coordinates. `thick` and `color` are uniform across ops.
-   NULL self or NULL g is a no-op. */
+/* Draw every op through `g`. Each shape-local coord `(x, y)` is rendered
+   at `(origin.x + x * scale.x, origin.y + y * scale.y)`, so non-uniform
+   scale stretches arcs into ellipses (intentional — lets a [-1, +1]
+   AND gate fill a non-square box). CIRCLE is rendered as a true circle
+   with radius `r * avg(scale.x, scale.y)` (keeps NOT's bubble round).
+   `thick` and `color` are uniform across ops. NULL self or NULL g
+   is a no-op. */
 void shape_draw(const shape_t *self, igraph_t *g,
-                vec2_t origin, float scale, float thick, uint32_t color);
+                vec2_t origin, vec2_t scale, float thick, uint32_t color);
 
 #endif /* DCS_FW_SHAPE_H */

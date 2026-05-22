@@ -1,4 +1,5 @@
 #include "shape.h"
+#include "graphics/igraph.h"
 #include <math.h>
 
 /* Arc-segment density: this many line segments per full revolution
@@ -10,12 +11,12 @@
 #define SHAPE_PI 3.14159265358979323846f
 #endif
 
-static vec2_t xf(vec2_t p, vec2_t origin, float scale) {
-    return (vec2_t){ origin.x + p.x * scale, origin.y + p.y * scale };
+static vec2_t xf(vec2_t p, vec2_t origin, vec2_t scale) {
+    return (vec2_t){ origin.x + p.x * scale.x, origin.y + p.y * scale.y };
 }
 
 static void draw_arc(igraph_t *g, vec2_t center, float r, float a0, float a1,
-                     vec2_t origin, float scale, float thick, uint32_t color) {
+                     vec2_t origin, vec2_t scale, float thick, uint32_t color) {
     float span = a1 - a0;
     if (span == 0.0f) return;
     float abs_span = span < 0 ? -span : span;
@@ -41,8 +42,9 @@ static void draw_arc(igraph_t *g, vec2_t center, float r, float a0, float a1,
 }
 
 void shape_draw(const shape_t *self, igraph_t *g,
-                vec2_t origin, float scale, float thick, uint32_t color) {
+                vec2_t origin, vec2_t scale, float thick, uint32_t color) {
     if (!self || !g || !self->ops || self->n_ops <= 0) return;
+    float circle_scale = (scale.x + scale.y) * 0.5f;
     for (int i = 0; i < self->n_ops; i++) {
         const shape_op_t *op = &self->ops[i];
         switch (op->kind) {
@@ -54,7 +56,7 @@ void shape_draw(const shape_t *self, igraph_t *g,
             }
             case SHAPE_OP_CIRCLE: {
                 vec2_t c = xf(op->a, origin, scale);
-                g->draw_circle_lines(g->self, c, op->r * scale, thick, color);
+                g->draw_circle_lines(g->self, c, op->r * circle_scale, thick, color);
                 break;
             }
             case SHAPE_OP_ARC:
