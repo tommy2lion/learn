@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define DOMAIN_NAME_LEN     64
-#define DOMAIN_MAX_IO       16
+#define DOMAIN_MAX_IO       32     /* v1.0.0 fits 8-bit adder (17 in / 9 out) */
 #define DOMAIN_MAX_PINS_IN  2      /* primitives need at most 2; chipsets in 2.6 */
 
 typedef uint8_t signal_t;

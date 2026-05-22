@@ -6,7 +6,9 @@
 #include <string.h>
 #include "../src/domain/component.h"
 #include "../src/domain/circuit.h"
+#include "../src/domain/circuit_io.h"
 #include "../src/domain/waveform.h"
+#include <stdlib.h>
 
 static int failures = 0, total = 0;
 
@@ -241,6 +243,42 @@ static void test_waveform_null_safety(void) {
     waveform_release(&w);
 }
 
+/* Stage 4C (U-39 step 1): with DOMAIN_MAX_IO bumped 16 → 32, a 32-in /
+   32-out circuit must construct cleanly AND serialize → re-parse to an
+   equivalent shape. Acts as the boundary proof that nothing in the
+   parser, serializer, or domain code silently assumed the old cap. */
+static void test_domain_max_io_32_round_trip(void) {
+    circuit_t *c = circuit_create();
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        char nm[16];
+        snprintf(nm, sizeof(nm), "in%d", i);
+        check("MAX_IO=32: add input", circuit_add_input(c, nm) == 0);
+    }
+    for (int i = 0; i < DOMAIN_MAX_IO; i++) {
+        char nm[16];
+        snprintf(nm, sizeof(nm), "out%d", i);
+        check("MAX_IO=32: add output", circuit_add_output(c, nm) == 0);
+    }
+    check("MAX_IO=32: input_count == 32",  c->input_count  == 32);
+    check("MAX_IO=32: output_count == 32", c->output_count == 32);
+
+    char *text = circuit_io_serialize(c);
+    check("MAX_IO=32: serialize succeeds", text != NULL);
+
+    char err[256] = {0};
+    circuit_t *c2 = circuit_io_parse(text, err, sizeof err);
+    check("MAX_IO=32: parse round-trip succeeds", c2 != NULL);
+    if (c2) {
+        check("MAX_IO=32: round-trip input_count preserved",
+              c2->input_count  == 32);
+        check("MAX_IO=32: round-trip output_count preserved",
+              c2->output_count == 32);
+        circuit_destroy(c2);
+    }
+    free(text);
+    circuit_destroy(c);
+}
+
 int main(void) {
     printf("=== domain: circuit / component tests ===\n");
     test_and_gate();
@@ -254,6 +292,8 @@ int main(void) {
     test_add_orphan_component_grows_caps();
     /* Step 3 v1.0.0 Stage 2 (U-3) */
     test_waveform_null_safety();
+    /* Step 3 v1.0.0 Stage 4C (U-39 step 1) */
+    test_domain_max_io_32_round_trip();
     printf("\n%d / %d passed\n", total - failures, total);
     return failures;
 }
