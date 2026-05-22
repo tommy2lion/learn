@@ -348,6 +348,19 @@ $(TEST_SIDE_TOOLBAR_EXE): $(FW_WIDGET_SRC) $(FW_WIDGET_HDR) $(FW_GRAPH_HDR) \
 test_side_toolbar: $(TEST_SIDE_TOOLBAR_EXE)
 	./$(TEST_SIDE_TOOLBAR_EXE)
 
+# ── Step 3 Stage 6 (U-21 part A): shape DSL ────────────────────────
+FW_SHAPE_SRC = src/framework/shape.c
+FW_SHAPE_HDR = src/framework/shape.h
+
+TEST_SHAPE_SRC = test/test_shape.c
+TEST_SHAPE_EXE = test/test_shape.exe
+
+$(TEST_SHAPE_EXE): $(FW_SHAPE_SRC) $(FW_SHAPE_HDR) $(FW_GRAPH_HDR) $(TEST_SHAPE_SRC)
+	$(CC) $(CFLAGS) $(FW_SHAPE_SRC) $(TEST_SHAPE_SRC) -o $@ -lm
+
+test_shape: $(TEST_SHAPE_EXE)
+	./$(TEST_SHAPE_EXE)
+
 TEST_DCS_APP_SRC = test/test_dcs_app.c
 TEST_DCS_APP_EXE = test/test_dcs_app.exe
 
@@ -370,9 +383,9 @@ test_dcs_app: $(TEST_DCS_APP_EXE)
 
 # ── future phases (2.6 layout block, ...) ──────────────────────────
 
-.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app cli gui demo demos clean
+.PHONY: test test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app test_shape cli gui demo demos clean
 
-test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app
+test: test_iplatform test_igraph test_widgets test_circuit test_circuit_io test_cli test_wire_geometry test_circuit_canvas_supplement test_help_dialog test_sha256 test_command_stack test_divider_widget test_input_panel test_side_toolbar test_dcs_app test_shape
 
 clean:
 	rm -f test/*.exe test/*.o demo/*.exe $(CLI_EXE) $(GUI_EXE)
