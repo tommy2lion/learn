@@ -11,6 +11,7 @@
 #include "../src/app/circuit_canvas_widget.h"
 #include "../src/domain/wire_geometry.h"
 #include "../src/domain/circuit.h"
+#include "../src/domain/circuit_io.h"
 #include "../src/domain/component.h"
 #include "../src/framework/widgets/widget.h"
 #include "../src/framework/graphics/igraph.h"
@@ -1604,6 +1605,97 @@ int main(void) {
         widget_destroy(&cw->base);
         circuit_destroy(c1);
         circuit_destroy(c2);
+    }
+
+    /* ── Stage 4B.5: no-crossings invariant on demo circuits ──── */
+    {
+        /* Each fixture is loaded from disk, laid out via auto_layout, then
+           wired via reseat. The invariant: no wire segment's STRICT
+           interior may intersect any component's bbox (gate body).
+           Touching an edge is allowed (pin connections do that). */
+        /* TODO (post v1.0.0-rc2): extend coverage to adder2bit / adder4bit /
+           adder8bit once the routing handles their nested carry-chain
+           pin density. The dynamic H-stub detour shipped in Stage 4B.4
+           only addresses single-obstacle crossings; richer circuits
+           surface multi-obstacle cases the finder doesn't yet resolve. */
+        const char *fixtures[] = {
+            "circuits/xor_gate.dcs",     /* the regression that drove this */
+            "circuits/and_gate.dcs",
+            "circuits/or_gate.dcs",
+            "circuits/not_gate.dcs",
+            "circuits/nand_gate.dcs",
+            "circuits/nor_gate.dcs",
+            "circuits/half_adder.dcs",
+            NULL,
+        };
+        for (int fi = 0; fixtures[fi]; fi++) {
+            FILE *f = fopen(fixtures[fi], "rb");
+            char loaded_msg[160];
+            snprintf(loaded_msg, sizeof loaded_msg,
+                     "no-crossings: %s loads", fixtures[fi]);
+            if (!f) { check(loaded_msg, 0); continue; }
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            char *buf = (char *)malloc((size_t)sz + 1);
+            if (!buf) { fclose(f); check(loaded_msg, 0); continue; }
+            size_t rd = fread(buf, 1, (size_t)sz, f);
+            buf[rd] = '\0';
+            fclose(f);
+
+            char err[256] = {0};
+            circuit_t *c = circuit_io_parse(buf, err, sizeof err);
+            free(buf);
+            check(loaded_msg, c != NULL);
+            if (!c) continue;
+
+            circuit_canvas_widget_t *cw =
+                circuit_canvas_widget_create((rect_t){0, 0, 1280, 800}, c);
+            const wire_geometry_t *g = circuit_canvas_widget_geometry(cw);
+
+            int crossings = 0;
+            const char *bad_net = NULL;
+            int bad_seg = -1, bad_comp = -1;
+            for (int ni = 0; ni < g->net_count; ni++) {
+                const wire_net_geom_t *net = &g->nets[ni];
+                for (int si = 0; si < net->seg_count; si++) {
+                    const wire_segment_t *s = &net->segs[si];
+                    float sx_lo = s->a.x < s->b.x ? s->a.x : s->b.x;
+                    float sx_hi = s->a.x > s->b.x ? s->a.x : s->b.x;
+                    float sy_lo = s->a.y < s->b.y ? s->a.y : s->b.y;
+                    float sy_hi = s->a.y > s->b.y ? s->a.y : s->b.y;
+                    for (int ci = 0; ci < c->component_count; ci++) {
+                        vec2_t p = c->components[ci]->position;
+                        float cx_lo = p.x - 40.0f, cx_hi = p.x + 40.0f;
+                        float cy_lo = p.y - 30.0f, cy_hi = p.y + 30.0f;
+                        if (sx_hi > cx_lo + 0.001f && sx_lo < cx_hi - 0.001f &&
+                            sy_hi > cy_lo + 0.001f && sy_lo < cy_hi - 0.001f) {
+                            if (!bad_net) {
+                                bad_net = net->wire_name;
+                                bad_seg = si;
+                                bad_comp = ci;
+                            }
+                            crossings++;
+                        }
+                    }
+                }
+            }
+
+            char clean_msg[200];
+            if (crossings == 0) {
+                snprintf(clean_msg, sizeof clean_msg,
+                         "no-crossings: %s clean", fixtures[fi]);
+            } else {
+                snprintf(clean_msg, sizeof clean_msg,
+                         "no-crossings: %s — %d crossing(s), first: net=%s seg=%d comp=%d",
+                         fixtures[fi], crossings,
+                         bad_net ? bad_net : "?", bad_seg, bad_comp);
+            }
+            check(clean_msg, crossings == 0);
+
+            widget_destroy(&cw->base);
+            circuit_destroy(c);
+        }
     }
 
     printf("\n%d / %d passed\n", total - failures, total);
